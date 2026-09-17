@@ -233,6 +233,21 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
     return menus.filter(m => m.nama?.toLowerCase().includes(q) || m.kode_unik?.toLowerCase().includes(q))
   }, [menus, searchQuery])
 
+  const groupedMenus = useMemo(() => {
+    const groups: Record<string, any[]> = {}
+    filteredMenus.forEach(menu => {
+      let groupName = 'Menu Lainnya'
+      if (menu.kode_unik && menu.kode_unik.includes('-')) {
+        groupName = menu.kode_unik.split('-')[0]
+      }
+      if (!groups[groupName]) {
+        groups[groupName] = []
+      }
+      groups[groupName].push(menu)
+    })
+    return groups
+  }, [filteredMenus])
+
   return (
     <div className="space-y-6">
       {/* Search Bar - Sticky at Top */}
@@ -249,14 +264,23 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredMenus.length === 0 ? (
-          <p className="text-slate-500 col-span-full">Tidak ada menu yang cocok dengan pencarian Anda.</p>
+      <div className="space-y-10">
+        {Object.keys(groupedMenus).length === 0 ? (
+          <p className="text-slate-500">Tidak ada menu yang cocok dengan pencarian Anda.</p>
         ) : null}
 
-        {filteredMenus.map((menu) => {
-          const isTutup = menu.is_active === false
-          return (
+        {Object.entries(groupedMenus).map(([groupName, groupItems]) => (
+          <div key={groupName} className="space-y-4">
+            {/* Category Header with Divider */}
+            <div className="flex items-center gap-4">
+              <h2 className="text-xl font-black text-yellow-800">{groupName}</h2>
+              <div className="flex-1 h-[2px] bg-yellow-100 rounded-full"></div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {groupItems.map((menu) => {
+                const isTutup = menu.is_active === false
+                return (
         <Card key={menu.id} className={`overflow-hidden border-yellow-200 flex flex-col ${isTutup ? 'opacity-60 grayscale' : ''}`}>
           {menu.foto_url && (
             <div className="h-48 w-full bg-slate-100">
@@ -466,8 +490,11 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
             </Dialog>
           </CardFooter>
         </Card>
-        )
-      })}
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
