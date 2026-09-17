@@ -10,10 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { supabase } from '@/lib/supabase'
 import { useMemo, useEffect } from 'react'
+import { Search } from 'lucide-react'
 
 export default function MenuList({ menus, addons, profiles }: { menus: any[], addons: any[], profiles: any[] }) {
   const [selectedMenu, setSelectedMenu] = useState<any>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const addonsByCategory = useMemo(() => {
     const grouped: Record<string, any[]> = {}
@@ -225,15 +227,36 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
     return baseHarga + addonPrice + wartegPrice
   }, [selectedMenu, selectedAddon, selectedWartegItemIds, addons])
 
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {menus.length === 0 ? (
-        <p className="text-slate-500">Belum ada menu yang tersedia.</p>
-      ) : null}
+  const filteredMenus = useMemo(() => {
+    if (!searchQuery.trim()) return menus
+    const q = searchQuery.toLowerCase()
+    return menus.filter(m => m.nama?.toLowerCase().includes(q) || m.kode_unik?.toLowerCase().includes(q))
+  }, [menus, searchQuery])
 
-      {menus.map((menu) => {
-        const isTutup = menu.is_active === false
-        return (
+  return (
+    <div className="space-y-6">
+      {/* Search Bar - Sticky at Top */}
+      <div className="sticky top-0 z-20 bg-white/90 backdrop-blur-md py-3 -mx-4 px-4 md:mx-0 md:px-0 border-b md:border-b-0 border-yellow-200">
+        <div className="relative max-w-lg mx-auto md:mx-0 shadow-sm rounded-full">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+          <Input 
+            type="text"
+            placeholder="Cari menu favorit Anda..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-11 h-12 bg-white rounded-full border-yellow-300 focus-visible:ring-yellow-500 text-base"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredMenus.length === 0 ? (
+          <p className="text-slate-500 col-span-full">Tidak ada menu yang cocok dengan pencarian Anda.</p>
+        ) : null}
+
+        {filteredMenus.map((menu) => {
+          const isTutup = menu.is_active === false
+          return (
         <Card key={menu.id} className={`overflow-hidden border-yellow-200 flex flex-col ${isTutup ? 'opacity-60 grayscale' : ''}`}>
           {menu.foto_url && (
             <div className="h-48 w-full bg-slate-100">
@@ -445,6 +468,7 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
         </Card>
         )
       })}
+      </div>
     </div>
   )
 }
