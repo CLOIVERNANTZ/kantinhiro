@@ -12,8 +12,8 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Kantin Pemesanan",
-  description: "Aplikasi Kantin Simple dan Canggih",
+  title: "Kantin Suryana",
+  description: "Aplikasi Kantin Hiro",
 };
 
 export default function RootLayout({
@@ -28,7 +28,7 @@ export default function RootLayout({
           <div className="container mx-auto px-4 h-16 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-2 text-yellow-600 hover:text-yellow-700 transition-colors">
               <Coffee className="h-6 w-6" />
-              <span className="font-bold text-xl">Kantin</span>
+              <span className="font-bold text-xl">Kantin Hiro</span>
             </Link>
 
             <div className="hidden md:block">
