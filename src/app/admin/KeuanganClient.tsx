@@ -104,7 +104,6 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
             <TableHeader className="bg-slate-50">
               <TableRow>
                 <TableHead className="w-[180px]">Nama User</TableHead>
-                <TableHead>Menu Terakhir Pesan</TableHead>
                 <TableHead className="text-right w-[150px]">Saldo</TableHead>
                 <TableHead className="w-[180px] text-center">Aksi</TableHead>
               </TableRow>
@@ -112,23 +111,15 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
             <TableBody>
               {filteredUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-8 text-slate-500">Tidak ada user ditemukan.</TableCell>
+                  <TableCell colSpan={3} className="text-center py-8 text-slate-500">Tidak ada user ditemukan.</TableCell>
                 </TableRow>
               ) : (
                 filteredUsers.map(user => {
-                  const lastOrder = recentOrders.find(o => o.profile_id === user.id)
-                  const lastMenuText = getFullOrderName(lastOrder)
-
                   return (
                     <TableRow key={user.id} className="hover:bg-slate-50/50">
                       <TableCell>
                         <div className="font-semibold text-sm text-slate-800">{user.nama}</div>
                         {user.divisi && <div className="text-xs text-slate-500">{user.divisi}</div>}
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm font-medium text-slate-700 italic">
-                          {lastMenuText}
-                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className={`font-bold text-sm ${user.saldo < 0 ? 'text-red-600' : 'text-green-600'}`}>
@@ -162,9 +153,9 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
                           size="sm"
                           className="text-xs h-8 px-3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
                           onClick={async () => {
-                            if (confirm(`Yakin ingin mereset PIN untuk ${user.nama} menjadi 0000?`)) {
-                              await supabase.from('kantin_profiles').update({ pin: '0000' }).eq('id', user.id)
-                              alert(`PIN ${user.nama} telah direset menjadi 0000.`)
+                            if (confirm(`Yakin ingin mereset PIN untuk ${user.nama} menjadi 00000?`)) {
+                              await supabase.from('kantin_profiles').update({ pin: '00000' }).eq('id', user.id)
+                              alert(`PIN ${user.nama} telah direset menjadi 00000.`)
                             }
                           }}
                         >

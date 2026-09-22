@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { FileText, List, Wallet } from 'lucide-react'
+import { FileText, List, Wallet, LogOut } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
@@ -50,9 +50,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   const tabs = [
-    { name: 'Daftar Saldo User', href: '/admin', icon: Wallet },
     { name: 'Rekapan', href: '/admin/rekapan', icon: FileText },
+    { name: 'Daftar Saldo User', href: '/admin', icon: Wallet },
     { name: 'Kelola Menu', href: '/admin/menus', icon: List },
+    { name: 'Top-Up PDF', href: '/admin/topup', icon: Wallet },
   ]
 
   return (
@@ -79,6 +80,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </Link>
             )
           })}
+          
+          <button 
+            onClick={async () => {
+              await supabase.auth.signOut()
+            }}
+            className="flex-none px-4 py-3 flex items-center justify-center gap-2 text-sm font-bold text-red-600 hover:bg-red-50 transition-colors border-l border-yellow-200"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline">Logout</span>
+          </button>
         </nav>
       </div>
 

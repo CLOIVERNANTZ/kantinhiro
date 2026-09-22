@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -41,6 +41,27 @@ const PriceCell = ({ initialValue, onSave, isChecked }: { initialValue: number, 
   )
 }
 
+const AdminNoteCell = ({ initialValue, onSave, isChecked }: { initialValue: string, onSave: (val: string) => void, isChecked: boolean }) => {
+  const [val, setVal] = useState(initialValue || '')
+  
+  const handleBlur = () => {
+    if (val !== (initialValue || '')) {
+      onSave(val)
+    }
+  }
+
+  return (
+    <Input 
+      type="text" 
+      placeholder="Catatan admin..."
+      value={val} 
+      onChange={(e) => setVal(e.target.value)} 
+      onBlur={handleBlur}
+      className={`h-7 text-[10px] w-full mt-1 px-2 ${isChecked ? 'bg-transparent border-transparent text-slate-500' : 'bg-yellow-50/50 border-yellow-200 text-slate-800 focus-visible:ring-yellow-400'}`}
+    />
+  )
+}
+
 export default function RekapanClient({ initialOrders }: { initialOrders: any[] }) {
   const [orders, setOrders] = useState(initialOrders)
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
@@ -52,7 +73,7 @@ export default function RekapanClient({ initialOrders }: { initialOrders: any[] 
     const { data: newOrders } = await supabase
       .from('kantin_orders')
       .select(`
-        id, deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status, is_recap_checked, menu_id, addon_id, profile_id,
+        id, deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status, is_recap_checked, menu_id, addon_id, profile_id, admin_note, created_at,
         kantin_profiles(nama),
         kantin_menus(nama, kode_unik),
         kantin_addons(nama)
@@ -111,6 +132,15 @@ export default function RekapanClient({ initialOrders }: { initialOrders: any[] 
         await supabase.from('kantin_transactions').update({ jumlah: newTotal }).eq('id', tx.id)
       }
     }
+  }
+
+  const handleNoteUpdate = async (orderId: string, newVal: string) => {
+    const order = orders.find(o => o.id === orderId)
+    if (!order) return
+    if ((order.admin_note || '') === newVal) return
+
+    setOrders(orders.map(o => o.id === orderId ? { ...o, admin_note: newVal } : o))
+    await supabase.from('kantin_orders').update({ admin_note: newVal }).eq('id', orderId)
   }
 
   const handleCopyWA = () => {
@@ -183,11 +213,11 @@ export default function RekapanClient({ initialOrders }: { initialOrders: any[] 
             <TableHeader className="bg-slate-50">
               <TableRow>
                 <TableHead className="w-[50px] text-center text-xs">✔</TableHead>
-                <TableHead className="w-[80px] text-xs">Grup</TableHead>
                 <TableHead className="w-[120px] text-xs">Pemesan</TableHead>
                 <TableHead className="text-xs">Pesanan</TableHead>
-                <TableHead className="w-[130px] text-right text-xs">Harga Menu</TableHead>
-                <TableHead className="w-[130px] text-right text-xs">Harga Addon</TableHead>
+                <TableHead className="w-[100px] text-right text-xs">Harga Menu</TableHead>
+                <TableHead className="w-[100px] text-right text-xs">Harga Addon</TableHead>
+                <TableHead className="w-[80px] text-center text-xs">Aksi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -198,68 +228,118 @@ export default function RekapanClient({ initialOrders }: { initialOrders: any[] 
                   </TableCell>
                 </TableRow>
               ) : (
-                sortedOrders.map((order) => {
-                  const isChecked = order.is_recap_checked
-                  let baseCode = order.kantin_menus?.kode_unik || '-'
-                  if (baseCode.includes('-')) baseCode = baseCode.split('-')[0]
-
-                  return (
-                    <TableRow key={order.id} className={isChecked ? 'bg-slate-100 opacity-60' : 'hover:bg-slate-50/50'}>
-                      <TableCell className="text-center">
-                        <Checkbox 
-                          checked={isChecked} 
-                          onCheckedChange={() => toggleCheck(order.id, isChecked)} 
-                        />
-                      </TableCell>
-                      <TableCell className="font-mono font-bold text-yellow-600 text-xs">
-                        {baseCode}
-                      </TableCell>
-                      <TableCell className="font-semibold text-xs text-slate-800">
-                        {order.kantin_profiles?.nama}
-                      </TableCell>
-                      <TableCell className="leading-tight">
-                        <span className="text-xs font-medium text-slate-700">
-                          {order.kantin_menus?.nama}
-                        </span>
-                        {order.deskripsi_pesanan && (
-                          <span className="text-[11px] text-slate-600 italic ml-1">
-                            ({order.deskripsi_pesanan})
-                          </span>
-                        )}
-                        {order.addon_id && (
-                          <span className="text-[11px] font-semibold text-blue-600 ml-1">
-                            + {order.kantin_addons?.nama} {order.deskripsi_addon ? `(${order.deskripsi_addon})` : ''}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <PriceCell 
-                          initialValue={order.harga} 
-                          isChecked={isChecked} 
-                          onSave={(newVal) => handlePriceUpdate(order.id, 'harga', newVal)} 
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {order.addon_id ? (
-                          <PriceCell 
-                            initialValue={order.harga_addon || 0} 
-                            isChecked={isChecked} 
-                            onSave={(newVal) => handlePriceUpdate(order.id, 'harga_addon', newVal)} 
-                          />
-                        ) : (
-                          <div className="text-center text-slate-400">-</div>
-                        )}
+                (Object.entries(
+                  sortedOrders.reduce((acc, order) => {
+                    let baseCode = order.kantin_menus?.kode_unik || 'Lainnya'
+                    if (baseCode.includes('-')) baseCode = baseCode.split('-')[0]
+                    if (!acc[baseCode]) acc[baseCode] = []
+                    acc[baseCode].push(order)
+                    return acc
+                  }, {} as Record<string, typeof sortedOrders>)
+                ) as [string, any[]][]).map(([group, groupOrders]) => (
+                  <React.Fragment key={group}>
+                    {/* Group Header */}
+                    <TableRow className="bg-yellow-50 hover:bg-yellow-50">
+                      <TableCell colSpan={6} className="py-2 px-3 font-black text-xs text-yellow-800 border-t border-yellow-200">
+                        KELOMPOK: {group} ({groupOrders.length} Pesanan)
                       </TableCell>
                     </TableRow>
-                  )
-                })
+                    
+                    {/* Group Items */}
+                    {groupOrders.map((order) => {
+                      const isChecked = order.is_recap_checked
+                      const isBatal = order.status === 'dibatalkan'
+                      
+                      return (
+                        <TableRow key={order.id} className={`${isChecked ? 'bg-slate-100 opacity-60' : 'hover:bg-slate-50/50'} ${isBatal ? 'bg-red-50 opacity-50' : ''}`}>
+                          <TableCell className="text-center w-[50px]">
+                            <Checkbox 
+                              checked={isChecked} 
+                              disabled={isBatal}
+                              onCheckedChange={() => toggleCheck(order.id, isChecked)} 
+                            />
+                          </TableCell>
+                          <TableCell className="font-semibold text-xs text-slate-800">
+                            {order.kantin_profiles?.nama}
+                            <div className="text-[9px] text-slate-400 font-normal mt-0.5">
+                              {order.created_at ? new Date(order.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </div>
+                          </TableCell>
+                          <TableCell className="leading-tight">
+                            <span className={`text-xs font-medium ${isBatal ? 'line-through text-red-500' : 'text-slate-700'}`}>
+                              {order.kantin_menus?.nama || order.kantin_addons?.nama}
+                            </span>
+                            {(order.deskripsi_pesanan || order.deskripsi_addon) && (
+                              <span className="text-[11px] text-slate-600 italic ml-1">
+                                ({order.deskripsi_pesanan || order.deskripsi_addon})
+                              </span>
+                            )}
+                            {isBatal && <span className="ml-2 text-[9px] bg-red-200 text-red-800 px-1 py-0.5 rounded font-bold uppercase">Batal/Habis</span>}
+                            
+                            {!isBatal && (
+                              <AdminNoteCell 
+                                initialValue={order.admin_note || ''} 
+                                isChecked={isChecked}
+                                onSave={(newVal) => handleNoteUpdate(order.id, newVal)} 
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell className="w-[100px]">
+                            {order.kantin_menus && !isBatal ? (
+                              <PriceCell 
+                                initialValue={order.harga} 
+                                isChecked={isChecked} 
+                                onSave={(newVal) => handlePriceUpdate(order.id, 'harga', newVal)} 
+                              />
+                            ) : (
+                              <div className="text-right text-slate-400 text-xs">{(order.harga || 0).toLocaleString('id-ID')}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="w-[100px]">
+                            {order.kantin_addons && !isBatal ? (
+                              <PriceCell 
+                                initialValue={order.harga_addon || order.harga} 
+                                isChecked={isChecked} 
+                                onSave={(newVal) => handlePriceUpdate(order.id, order.addon_id ? 'harga_addon' : 'harga', newVal)} 
+                              />
+                            ) : (
+                              <div className="text-right text-slate-400 text-xs">{(order.harga_addon || 0).toLocaleString('id-ID')}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="w-[80px] text-center">
+                            {!isBatal && !isChecked && (
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-6 text-[10px] px-2 text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={async () => {
+                                  const c = confirm(`Batalkan pesanan ini karena habis/kosong? Saldo ${order.kantin_profiles?.nama} akan dikembalikan.`)
+                                  if (!c) return
+                                  try {
+                                    const { error } = await supabase.rpc('cancel_user_order', { p_order_id: order.id })
+                                    if (error) throw error
+                                    setOrders(orders.map(o => o.id === order.id ? { ...o, status: 'dibatalkan' } : o))
+                                  } catch (e: any) {
+                                    alert("Gagal membatalkan: " + e.message)
+                                  }
+                                }}
+                              >
+                                Batalkan
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </React.Fragment>
+                ))
               )}
             </TableBody>
             <TableFooter className="bg-slate-100 font-bold">
               <TableRow>
-                <TableCell colSpan={4} className="text-right py-3 text-sm">Total Omset Rekapan Hari Ini:</TableCell>
-                <TableCell colSpan={2} className="text-right py-3 text-sm text-yellow-700">
-                  Rp {sortedOrders.reduce((sum, o) => sum + Number(o.harga) + Number(o.harga_addon || 0), 0).toLocaleString('id-ID')}
+                <TableCell colSpan={3} className="text-right py-3 text-sm">Total Omset Rekapan Hari Ini:</TableCell>
+                <TableCell colSpan={3} className="text-right py-3 text-sm text-yellow-700">
+                  Rp {sortedOrders.filter(o => o.status !== 'dibatalkan').reduce((sum, o) => sum + Number(o.harga) + Number(o.harga_addon || 0), 0).toLocaleString('id-ID')}
                 </TableCell>
               </TableRow>
             </TableFooter>

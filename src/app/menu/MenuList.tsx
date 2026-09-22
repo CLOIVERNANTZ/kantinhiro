@@ -46,13 +46,31 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
   // Form State
   const [profileName, setProfileName] = useState('')
   const [profileDivisi, setProfileDivisi] = useState('')
+  const [activeProfile, setActiveProfile] = useState<any>(null)
+  const [authChecking, setAuthChecking] = useState(true)
 
   useEffect(() => {
     const savedName = localStorage.getItem('kantin_userName')
-    if (savedName) setProfileName(savedName)
-    const savedDivisi = localStorage.getItem('kantin_userDivisi')
-    if (savedDivisi) setProfileDivisi(savedDivisi)
-  }, [])
+    if (!savedName) {
+      window.location.href = '/login'
+      return
+    }
+    
+    // Auto find active profile by name
+    const profile = profiles.find(p => p.nama?.toLowerCase() === savedName.toLowerCase())
+    if (profile) {
+      setActiveProfile(profile)
+      setProfileName(profile.nama)
+      setProfileDivisi(profile.divisi || '')
+      setAuthChecking(false)
+    } else {
+      localStorage.removeItem('kantin_userName')
+      window.location.href = '/login'
+    }
+  }, [profiles])
+
+
+  
   const [customDesc, setCustomDesc] = useState('') // For standar
   const [wartegNasi, setWartegNasi] = useState('')
   const [wartegLauk, setWartegLauk] = useState('')
@@ -70,56 +88,22 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
       return
     }
 
-    if (pin.length !== 4) {
-      alert("PIN harus 4 digit angka!")
-      return
-    }
-
     if (selectedMenu?.is_active === false) {
       const proceed = confirm("Menu/Grup ini sedang ditandai TUTUP oleh Admin.\n\nApakah Anda yakin ingin memaksa pesan?")
       if (!proceed) return
     }
 
-    // 1. Get or create profile
-    let profileId = null
-    const existingProfile = profiles.find(p => p.nama.toLowerCase() === profileName.toLowerCase())
-    
-    if (existingProfile) {
-      // Live verify PIN from DB using RPC
-      const { data: isPinValid, error: pinErr } = await supabase.rpc('verify_pin', { p_profile_id: existingProfile.id, p_pin: pin })
-      if (pinErr) {
-        alert("Terjadi kesalahan saat memverifikasi PIN.")
-        return
-      }
-      
-      if (!isPinValid) {
-        alert("PIN Anda salah! Jika lupa, reset via Admin.")
-        return
-      }
-      profileId = existingProfile.id
-      
-      if (!existingProfile.pin || existingProfile.pin === '0000') {
-        await supabase.from('kantin_profiles').update({ pin }).eq('id', profileId)
-      }
-    } else {
-      // Create new profile
-      const { data: newProfile, error: profileErr } = await supabase
-        .from('kantin_profiles')
-        .insert([{ nama: profileName, divisi: profileDivisi, pin: pin }])
-        .select()
-        .single()
-      
-      if (profileErr) {
-        alert("Gagal membuat profil pengguna")
-        return
-      }
-      profileId = newProfile.id
+    const p_id = activeProfile?.id
+    if (!p_id) {
+      alert('Sesi Anda tidak valid. Silakan login ulang.')
+      window.location.href = '/login'
+      return
     }
 
-    // Sync to localStorage
-    localStorage.setItem('kantin_userName', profileName)
-    localStorage.setItem('kantin_userDivisi', profileDivisi)
-    window.dispatchEvent(new Event('kantin_user_updated'))
+    // Aturan Hutang (Debt Rule) - Hanya peringatan visual di UI, tidak memblokir pesanan
+    // if (activeProfile.saldo < 0) { ... }
+
+    let profileId = p_id
 
     // 2. Format description based on menu type
     let finalDesc = customDesc
@@ -237,8 +221,9 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
     const groups: Record<string, any[]> = {}
     filteredMenus.forEach(menu => {
       let groupName = 'Menu Lainnya'
-      if (menu.kode_unik && menu.kode_unik.includes('-')) {
-        groupName = menu.kode_unik.split('-')[0]
+      const kCode = menu.kode_unik || ''
+      if (kCode && kCode.includes('-')) {
+        groupName = kCode.split('-')[0]
       }
       if (!groups[groupName]) {
         groups[groupName] = []
@@ -247,6 +232,10 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
     })
     return groups
   }, [filteredMenus])
+
+  if (authChecking) {
+    return <div className="min-h-[50vh] flex items-center justify-center">Memeriksa sesi...</div>
+  }
 
   return (
     <div className="space-y-6">
@@ -339,52 +328,26 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
                 )}
 
                 <form onSubmit={handlePesan} className="space-y-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="nama">Nama (Wajib)</Label>
-                    <Input 
-                      id="nama" 
-                      placeholder="Ketik nama Anda..." 
-                      value={profileName}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setProfileName(val.replace(/\b\w/g, char => char.toUpperCase()))
+                  <div className="flex justify-between items-center bg-slate-50 border p-2 rounded mb-2">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">{activeProfile?.nama}</p>
+                      <p className="text-[10px] text-slate-500">{activeProfile?.divisi || 'Tanpa Divisi'}</p>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="h-6 text-[10px] text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={() => {
+                        localStorage.removeItem('kantin_userName')
+                        window.location.href = '/login'
                       }}
-                      required 
-                      list="profile-list"
-                    />
-                    <datalist id="profile-list">
-                      {profiles.map(p => (
-                        <option key={p.id} value={p.nama} />
-                      ))}
-                    </datalist>
-                  </div>
-                  
-                  <div className="grid gap-2">
-                    <Label htmlFor="divisi">Divisi</Label>
-                    <Input 
-                      id="divisi" 
-                      placeholder="Divisi Anda (opsional jika sudah ada)" 
-                      value={profileDivisi}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setProfileDivisi(val.replace(/\b\w/g, char => char.toUpperCase()))
-                      }}
-                    />
+                      type="button"
+                    >
+                      Logout
+                    </Button>
                   </div>
 
-                  <div className="grid gap-2 mt-2">
-                    <Label htmlFor="pin">PIN (4 Angka)</Label>
-                    <Input 
-                      id="pin"
-                      type="password"
-                      maxLength={4}
-                      placeholder="Masukkan atau buat PIN baru"
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                      required
-                    />
-                    <a href={`https://wa.me/${process.env.NODE_ENV === 'development' ? '6285162563828' : '6287885456448'}?text=Halo%20Admin%20Kantin,%20saya%20${profileName || 'user'}%20lupa%20PIN%20akun%20saya.%20Tolong%20bantu%20reset%20PIN%20saya%20ya,%20terima%20kasih.`} target="_blank" className="text-xs text-blue-500 hover:underline">Lupa PIN? Reset via WA</a>
-                  </div>
+
 
                   <div className="border-t border-slate-200 my-4 pt-4">
                     <h4 className="font-semibold text-sm mb-3">Detail Makanan</h4>

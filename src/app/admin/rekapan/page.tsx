@@ -12,7 +12,7 @@ export default async function RekapanPage() {
   const { data: orders, error } = await supabase
     .from('kantin_orders')
     .select(`
-      id, deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status, is_recap_checked, menu_id, addon_id, profile_id,
+      id, deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status, is_recap_checked, menu_id, addon_id, profile_id, admin_note, created_at,
       kantin_profiles(nama),
       kantin_menus(nama, kode_unik),
       kantin_addons(nama)
