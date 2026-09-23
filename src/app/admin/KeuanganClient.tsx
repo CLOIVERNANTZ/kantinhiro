@@ -9,8 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { supabase } from '@/lib/supabase'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
+import { useAppDialog } from '@/components/AppDialogProvider'
 
 export default function KeuanganClient({ profiles, recentOrders }: { profiles: any[], recentOrders: any[] }) {
+  const { showAlert, showConfirm } = useAppDialog()
   // Sort users: those with recent orders first (by order recency), then alphabetical
   const sortedProfiles = useMemo(() => {
     return [...profiles].sort((a, b) => {
@@ -55,7 +57,7 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
   const handleDeposit = async (userId: string, currentSaldo: number) => {
     const amount = parseInt(depositAmount)
     if (!amount || amount <= 0) {
-      alert("Masukkan jumlah deposit yang valid.")
+      showAlert({ title: "Perhatian", message: "Masukkan jumlah deposit yang valid.", type: "warning" })
       return
     }
 
@@ -73,7 +75,7 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
       jumlah: amount,
       keterangan: 'Deposit Saldo'
     }])
-    alert("Deposit berhasil ditambahkan.")
+    showAlert({ title: "Berhasil", message: "Deposit berhasil ditambahkan.", type: "success" })
   }
 
   const loadHistory = async (userId: string) => {
@@ -153,9 +155,15 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
                           size="sm"
                           className="text-xs h-8 px-3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
                           onClick={async () => {
-                            if (confirm(`Yakin ingin mereset PIN untuk ${user.nama} menjadi 00000?`)) {
+                            const proceed = await showConfirm({
+                              title: "Reset PIN",
+                              message: `Yakin ingin mereset PIN untuk ${user.nama} menjadi 00000?`,
+                              confirmText: "Ya, Reset PIN",
+                              variant: "destructive"
+                            })
+                            if (proceed) {
                               await supabase.from('kantin_profiles').update({ pin: '00000' }).eq('id', user.id)
-                              alert(`PIN ${user.nama} telah direset menjadi 00000.`)
+                              showAlert({ title: "Berhasil", message: `PIN ${user.nama} telah direset menjadi 00000.`, type: "success" })
                             }
                           }}
                         >

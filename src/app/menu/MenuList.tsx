@@ -11,8 +11,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { supabase } from '@/lib/supabase'
 import { useMemo, useEffect } from 'react'
 import { Search } from 'lucide-react'
+import { useAppDialog } from '@/components/AppDialogProvider'
 
 export default function MenuList({ menus, addons, profiles }: { menus: any[], addons: any[], profiles: any[] }) {
+  const { showAlert, showConfirm } = useAppDialog()
   const [selectedMenu, setSelectedMenu] = useState<any>(null)
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -84,24 +86,25 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
   const handlePesan = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profileName) {
-      alert("Nama wajib diisi!")
+      showAlert({ title: "Perhatian", message: "Nama wajib diisi!", type: "warning" })
       return
     }
 
     if (selectedMenu?.is_active === false) {
-      const proceed = confirm("Menu/Grup ini sedang ditandai TUTUP oleh Admin.\n\nApakah Anda yakin ingin memaksa pesan?")
+      const proceed = await showConfirm({
+        title: "Menu Ditutup",
+        message: "Menu/Grup ini sedang ditandai TUTUP oleh Admin.\n\nApakah Anda yakin ingin memaksa pesan?",
+        confirmText: "Paksakan Pesan"
+      })
       if (!proceed) return
     }
 
     const p_id = activeProfile?.id
     if (!p_id) {
-      alert('Sesi Anda tidak valid. Silakan login ulang.')
+      showAlert({ title: "Sesi Habis", message: "Sesi Anda tidak valid. Silakan login ulang.", type: "error" })
       window.location.href = '/login'
       return
     }
-
-    // Aturan Hutang (Debt Rule) - Hanya peringatan visual di UI, tidak memblokir pesanan
-    // if (activeProfile.saldo < 0) { ... }
 
     let profileId = p_id
 
@@ -118,14 +121,18 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
     // Cutoff time - soft warning only
     if (selectedMenu.jam_tutup) {
       const now = new Date()
-      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:00`
-      if (currentTime > selectedMenu.jam_tutup) {
-        const proceed = confirm(
-          `⚠️ ${selectedMenu.nama} sudah lewat batas jam ${selectedMenu.jam_tutup.substring(0, 5)}.\n\nLanjutkan pesan? Admin akan diinfokan.`
-        )
-        if (!proceed) return
-        const note = `⚠️ Pesan lewat jam ${selectedMenu.jam_tutup.substring(0,5)}`
-        finalDesc = finalDesc ? `${finalDesc} | ${note}` : note
+      const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
+      const hours = jakartaTime.getHours().toString().padStart(2, '0')
+      const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
+      const jakartaTimeStr = `${hours}:${minutes}`
+
+      if (jakartaTimeStr >= selectedMenu.jam_tutup.substring(0, 5)) {
+        showAlert({
+          title: "Batas Waktu Terlewat",
+          message: `Menu ${selectedMenu.nama} sudah melewati batas waktu pemesanan (${selectedMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
+          type: "error"
+        })
+        return
       }
     }
 
@@ -164,10 +171,9 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
     })
 
     if (rpcErr) {
-      alert("Gagal membuat pesanan: " + rpcErr.message)
+      showAlert({ title: "Gagal", message: "Gagal membuat pesanan: " + rpcErr.message, type: "error" })
     } else {
-
-      alert("Pesanan berhasil dibuat!")
+      showAlert({ title: "Berhasil", message: "Pesanan berhasil dibuat!", type: "success" })
       setIsOpen(false)
       // Reset form
       setProfileName('')

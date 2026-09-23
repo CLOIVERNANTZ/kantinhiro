@@ -33,13 +33,11 @@ export default function AdminNav() {
     <div className="flex items-center gap-4 border-l pl-4 border-slate-200">
       {session ? (
         <>
-          <Link href="/admin" className="text-sm font-bold text-yellow-700 hover:text-yellow-800 flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            <span>Admin Panel</span>
+          <Link href="/admin" className="text-yellow-700 hover:text-yellow-800 flex items-center justify-center rounded-full p-2 hover:bg-yellow-50 transition-colors" title="Admin Panel">
+            <Settings className="h-5 w-5" />
           </Link>
-          <button onClick={handleLogout} className="text-sm font-semibold text-red-500 hover:text-red-700 flex items-center gap-2 ml-2">
-            <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Logout</span>
+          <button onClick={handleLogout} className="text-red-500 hover:text-red-700 flex items-center justify-center rounded-full p-2 hover:bg-red-50 transition-colors ml-1" title="Logout">
+            <LogOut className="h-5 w-5" />
           </button>
         </>
       ) : (

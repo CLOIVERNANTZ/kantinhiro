@@ -23,7 +23,7 @@ export default async function Home() {
       .select(`
         *,
         kantin_profiles(nama),
-        kantin_menus(nama, kode_unik),
+        kantin_menus(nama, kode_unik, jam_tutup),
         kantin_addons(nama)
       `)
       .eq('tanggal', todayStr)

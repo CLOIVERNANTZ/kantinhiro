@@ -8,8 +8,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { useAppDialog } from '@/components/AppDialogProvider'
 
 export default function UserLoginForm({ profiles }: { profiles: any[] }) {
+  const { showAlert } = useAppDialog()
   const [isLogin, setIsLogin] = useState(true)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
@@ -101,7 +103,7 @@ export default function UserLoginForm({ profiles }: { profiles: any[] }) {
 
       if (error) throw error
 
-      alert('Pendaftaran berhasil! Silakan Login dengan PIN Anda.')
+      showAlert({ title: "Berhasil", message: "Pendaftaran berhasil! Silakan Login dengan PIN Anda.", type: "success" })
       setIsLogin(true)
       setLoginName(newProfileData?.nama || newName)
       setLoginPin(newPin)

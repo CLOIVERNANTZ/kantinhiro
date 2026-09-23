@@ -14,8 +14,10 @@ import { supabase } from '@/lib/supabase'
 import { AlertCircle, Image as ImageIcon, ShoppingBag, Trash2, KeyRound } from 'lucide-react'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
+import { useAppDialog } from '@/components/AppDialogProvider'
 
 export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
+  const { showAlert, showConfirm } = useAppDialog()
   const [orders, setOrders] = useState(initialOrders)
   
   // Auth State
@@ -70,11 +72,13 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     if (!activeProfile?.id) return
 
     const fetchLastMeal = async () => {
-      // 1. Get the most recent order date (excluding today if possible, or just the absolute last date they ordered)
+      // 1. Get the most recent order date EXCLUDING today
       const { data: latest } = await supabase
         .from('kantin_orders')
         .select('tanggal')
         .eq('profile_id', activeProfile.id)
+        .lt('tanggal', todayStr)
+        .order('tanggal', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(1)
 
@@ -147,11 +151,15 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     return total
   }, [checkedItems, menus, addons])
 
-  const toggleItem = (itemId: string, isHabis: boolean, isTutup: boolean) => {
+  const toggleItem = async (itemId: string, isHabis: boolean, isTutup: boolean) => {
     if (isHabis) return // Cannot select sold out items
     
     if (isTutup) {
-      const proceed = confirm("Item ini sedang ditandai TUTUP oleh Admin. Yakin ingin pesan?")
+      const proceed = await showConfirm({
+        title: "Menu Ditutup",
+        message: "Item ini sedang ditandai TUTUP oleh Admin. Yakin ingin memesannya?",
+        confirmText: "Paksakan Pesan"
+      })
       if (!proceed) return
     }
 
@@ -164,20 +172,44 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     e.preventDefault()
     
     if (checkedItems.length === 0) {
-      alert("Pilih minimal satu menu atau add-on!")
+      showAlert({ title: "Perhatian", message: "Pilih minimal satu menu atau add-on!", type: "warning" })
       return
     }
 
     const p_id = activeProfile?.id
     if (!p_id) {
-      alert('Sesi Anda tidak valid. Silakan login ulang.')
+      showAlert({ title: "Sesi Habis", message: "Sesi Anda tidak valid. Silakan login ulang.", type: "error" })
       window.location.href = '/login'
       return
     }
 
+    // CEK JAM TUTUP SEMUA MENU YANG DIPILIH
+    const now = new Date()
+    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
+    const hours = jakartaTime.getHours().toString().padStart(2, '0')
+    const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
+    const jakartaTimeStr = `${hours}:${minutes}`
+
+    for (const itemId of checkedItems) {
+      const isMenu = menus.find(x => x.id === itemId)
+      if (isMenu && isMenu.jam_tutup && jakartaTimeStr >= isMenu.jam_tutup.substring(0, 5)) {
+        showAlert({
+          title: "Batas Waktu Terlewat",
+          message: `Menu ${isMenu.nama} sudah melewati batas waktu pemesanan (${isMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
+          type: "error"
+        })
+        return
+      }
+    }
+
     // Hanya peringatan hutang, biarkan pesan
     if (activeProfile.saldo < 0) {
-      const proceed = confirm(`INFO: Anda masih memiliki tunggakan/minus sebesar Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}.\n\nApakah Anda tetap ingin melanjutkan pesanan ini?`)
+      const proceed = await showConfirm({
+        title: "Peringatan Tunggakan",
+        message: `INFO: Anda masih memiliki tunggakan/minus sebesar Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}.\n\nApakah Anda tetap ingin melanjutkan pesanan ini?`,
+        confirmText: "Ya, Lanjutkan",
+        variant: "destructive"
+      })
       if (!proceed) return
     }
 
@@ -236,13 +268,13 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       setOrders(prev => [...newOrders, ...prev])
       setCheckedItems([])
       setItemNotes({})
-      alert("Pesanan berhasil dibuat!")
+      showAlert({ title: "Berhasil", message: "Pesanan Anda berhasil dibuat!", type: "success" })
       
       // Update local profile balance if possible (approximate, actual is in DB)
       window.dispatchEvent(new Event('kantin_user_updated'))
       
     } catch (e: any) {
-      alert("Gagal memproses pesanan: " + e.message)
+      showAlert({ title: "Gagal", message: "Gagal memproses pesanan: " + e.message, type: "error" })
     } finally {
       setIsSubmitting(false)
     }
@@ -258,14 +290,41 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       return `- ${name}${note}`
     }).join('\n')
 
-    const proceed = confirm(`Apakah Anda ingin memesan ulang pesanan terakhir Anda (Tgl: ${lastMeal.date})?\n\nDetail:\n${itemNames}\n\nKlik OK untuk langsung memesan!`)
+    const proceed = await showConfirm({
+      title: "Pesan Ulang",
+      message: `Apakah Anda ingin memesan ulang pesanan terakhir Anda (Tgl: ${lastMeal.date})?\n\nDetail:\n${itemNames}`,
+      confirmText: "Ya, Pesan Sekarang"
+    })
     if (!proceed) return
 
     const p_id = activeProfile?.id
     if (!p_id) return
 
+    // CEK JAM TUTUP SEMUA MENU YANG AKAN DI-REORDER
+    const now = new Date()
+    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
+    const hours = jakartaTime.getHours().toString().padStart(2, '0')
+    const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
+    const jakartaTimeStr = `${hours}:${minutes}`
+
+    for (const oldOrder of lastMeal.items) {
+      if (oldOrder.kantin_menus?.jam_tutup && jakartaTimeStr >= oldOrder.kantin_menus.jam_tutup.substring(0, 5)) {
+        showAlert({
+          title: "Batas Waktu Terlewat",
+          message: `Menu ${oldOrder.kantin_menus.nama} sudah melewati batas waktu pemesanan (${oldOrder.kantin_menus.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
+          type: "error"
+        })
+        return
+      }
+    }
+
     if (activeProfile.saldo < 0) {
-      const debtProceed = confirm(`INFO: Anda masih memiliki tunggakan/minus sebesar Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}.\n\nApakah Anda tetap ingin melanjutkan pesanan ini?`)
+      const debtProceed = await showConfirm({
+        title: "Peringatan Tunggakan",
+        message: `INFO: Anda masih memiliki tunggakan/minus sebesar Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}.\n\nApakah Anda tetap ingin melanjutkan pesanan ini?`,
+        confirmText: "Ya, Lanjutkan",
+        variant: "destructive"
+      })
       if (!debtProceed) return
     }
 
@@ -276,7 +335,11 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       for (const oldOrder of lastMeal.items) {
         // Quick check if menu is active
         if (oldOrder.kantin_menus?.is_active === false) {
-          const force = confirm(`Peringatan: Menu ${oldOrder.kantin_menus.nama} sedang ditandai TUTUP. Lanjutkan pesan ini?`)
+          const force = await showConfirm({
+            title: "Menu Ditutup",
+            message: `Peringatan: Menu ${oldOrder.kantin_menus.nama} sedang ditandai TUTUP. Lanjutkan pesan ini?`,
+            confirmText: "Paksakan Pesan"
+          })
           if (!force) continue
         }
 
@@ -306,7 +369,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
         const { data: newOrder, error: fetchErr } = await supabase
           .from('kantin_orders')
-          .select(`*, kantin_profiles(nama, saldo), kantin_menus(nama, kode_unik), kantin_addons(nama)`)
+          .select(`*, kantin_profiles(nama, saldo), kantin_menus(nama, kode_unik, jam_tutup), kantin_addons(nama)`)
           .eq('id', rpcData.order_id)
           .single()
 
@@ -316,11 +379,11 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
 
       setOrders(prev => [...newOrders, ...prev])
-      alert("Pemesanan ulang berhasil!")
+      showAlert({ title: "Berhasil", message: "Pemesanan ulang berhasil!", type: "success" })
       window.dispatchEvent(new Event('kantin_user_updated'))
       
     } catch (e: any) {
-      alert("Gagal memproses pesanan: " + e.message)
+      showAlert({ title: "Gagal", message: "Gagal memproses pesanan: " + e.message, type: "error" })
     } finally {
       setIsSubmitting(false)
     }
@@ -330,7 +393,31 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     const order = orders.find(o => o.id === orderId)
     if (!order) return
     
-    const confirmDelete = confirm(`Hapus pesanan ${order.kantin_menus?.nama || order.kantin_addons?.nama}? Saldo akan dikembalikan otomatis.`)
+    // Cek jam tutup khusus untuk Menu
+    if (order.kantin_menus?.jam_tutup) {
+      const jamTutup = order.kantin_menus.jam_tutup
+      const now = new Date()
+      const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
+      const hours = jakartaTime.getHours().toString().padStart(2, '0')
+      const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
+      const jakartaTimeStr = `${hours}:${minutes}`
+      
+      if (jakartaTimeStr >= jamTutup.substring(0, 5)) {
+        showAlert({
+          title: "Batas Waktu Lewat",
+          message: `Waktu pembatalan untuk menu ini sudah ditutup (Batas: ${jamTutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung jika ada perubahan mendesak.`,
+          type: "error"
+        })
+        return
+      }
+    }
+    
+    const confirmDelete = await showConfirm({
+      title: "Batalkan Pesanan",
+      message: `Hapus pesanan ${order.kantin_menus?.nama || order.kantin_addons?.nama}?\nSaldo akan dikembalikan secara otomatis.`,
+      confirmText: "Ya, Batalkan",
+      variant: "destructive"
+    })
     if (!confirmDelete) return
 
     try {
@@ -340,8 +427,9 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
       setOrders(orders.filter(o => o.id !== orderId))
       window.dispatchEvent(new Event('kantin_user_updated'))
+      showAlert({ title: "Dibatalkan", message: "Pesanan berhasil dibatalkan dan saldo telah kembali.", type: "success" })
     } catch (e: any) {
-      alert("Gagal membatalkan pesanan. Mungkin database belum diperbarui: " + e.message)
+      showAlert({ title: "Gagal", message: "Gagal membatalkan pesanan. " + e.message, type: "error" })
     }
   }
 
