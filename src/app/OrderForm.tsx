@@ -13,11 +13,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { supabase } from '@/lib/supabase'
 import { AlertCircle, Image as ImageIcon, ShoppingBag, Trash2, KeyRound } from 'lucide-react'
 import { format } from 'date-fns'
+import { useRouter } from 'next/navigation'
 import { id } from 'date-fns/locale'
 import { useAppDialog } from '@/components/AppDialogProvider'
 
 export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
+  const router = useRouter()
   const [orders, setOrders] = useState(initialOrders)
   
   // Auth State
@@ -270,6 +272,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       setOrders(prev => [...newOrders, ...prev])
       setCheckedItems([])
       setItemNotes({})
+      router.refresh()
       showAlert({ title: "Berhasil", message: "Pesanan Anda berhasil dibuat!", type: "success" })
       
       // Update local profile balance if possible (approximate, actual is in DB)
@@ -381,6 +384,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
 
       setOrders(prev => [...newOrders, ...prev])
+      router.refresh()
       showAlert({ title: "Berhasil", message: "Pemesanan ulang berhasil!", type: "success" })
       window.dispatchEvent(new Event('kantin_user_updated'))
       
@@ -428,6 +432,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       if (error) throw error
 
       setOrders(orders.filter(o => o.id !== orderId))
+      router.refresh()
       window.dispatchEvent(new Event('kantin_user_updated'))
       showAlert({ title: "Dibatalkan", message: "Pesanan berhasil dibatalkan dan saldo telah kembali.", type: "success" })
     } catch (e: any) {
