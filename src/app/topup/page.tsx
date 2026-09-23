@@ -16,15 +16,37 @@ export default function TopUpPage() {
 
   useEffect(() => {
     const savedName = localStorage.getItem('kantin_userName')
+    const savedDivisi = localStorage.getItem('kantin_divisi') || ''
+    const savedProfileId = localStorage.getItem('kantin_profile_id')
+
     if (!savedName) {
       router.replace('/login')
       return
     }
-    
-    // Fetch profile by name
-    supabase.from('kantin_profiles').select('*').ilike('nama', savedName).single().then(({ data }) => {
-      if (data) setActiveProfile(data)
-    })
+
+    // Prefer matching by profile_id (most reliable), fallback to nama+divisi combo
+    if (savedProfileId) {
+      supabase.from('kantin_profiles').select('*').eq('id', savedProfileId).single().then(({ data }) => {
+        if (data) setActiveProfile(data)
+        else {
+          // ID no longer valid, try by name+divisi
+          supabase.from('kantin_profiles').select('*')
+            .ilike('nama', savedName)
+            .ilike('divisi', savedDivisi || '%')
+            .limit(1)
+            .single()
+            .then(({ data: d }) => { if (d) setActiveProfile(d) })
+        }
+      })
+    } else {
+      // Match by nama + divisi to avoid collision when two users share same name
+      supabase.from('kantin_profiles').select('*')
+        .ilike('nama', savedName)
+        .ilike('divisi', savedDivisi ? savedDivisi : '%')
+        .limit(1)
+        .single()
+        .then(({ data }) => { if (data) setActiveProfile(data) })
+    }
   }, [router])
 
   if (!activeProfile) {

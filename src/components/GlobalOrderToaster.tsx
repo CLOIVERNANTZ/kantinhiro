@@ -8,6 +8,7 @@ type Toast = {
   id: string
   message: string
   title: string
+  type?: 'order' | 'topup'
 }
 
 export default function GlobalOrderToaster() {
@@ -56,8 +57,38 @@ export default function GlobalOrderToaster() {
       )
       .subscribe()
 
+    // Subscribe to Top Up reminders (kantin_profiles updates)
+    const profileChannel = supabase
+      .channel('public:kantin_profiles')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'kantin_profiles' },
+        (payload) => {
+          const oldProfile = payload.old
+          const newProfile = payload.new
+          
+          // Check if they just requested a topup
+          if (newProfile.is_requesting_topup && !oldProfile.is_requesting_topup) {
+            const toastId = Math.random().toString()
+            setToasts(prev => [...prev, {
+              id: toastId,
+              title: "🔔 Pengingat Top Up!",
+              message: `${newProfile.nama} baru saja menekan tombol Ingatkan Admin karena sudah transfer.`,
+              type: 'topup'
+            }])
+
+            // Auto remove after 8 seconds
+            setTimeout(() => {
+              setToasts(prev => prev.filter(t => t.id !== toastId))
+            }, 8000)
+          }
+        }
+      )
+      .subscribe()
+
     return () => {
       supabase.removeChannel(channel)
+      supabase.removeChannel(profileChannel)
     }
   }, [])
 
@@ -65,21 +96,24 @@ export default function GlobalOrderToaster() {
 
   return (
     <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
-      {toasts.map(t => (
-        <div 
-          key={t.id} 
-          className="bg-white/95 backdrop-blur-md shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-yellow-200 rounded-xl p-3 w-64 md:w-72 flex items-center gap-3 pointer-events-auto transform transition-all duration-500 hover:scale-105"
-          style={{ animation: 'slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}
-        >
-          <div className="bg-yellow-100 text-yellow-600 rounded-full w-10 h-10 flex items-center justify-center shrink-0">
-            <UtensilsCrossed className="w-5 h-5" />
+      {toasts.map(t => {
+        const isTopup = t.type === 'topup'
+        return (
+          <div 
+            key={t.id} 
+            className={`bg-white/95 backdrop-blur-md shadow-[0_8px_30px_rgb(0,0,0,0.12)] border rounded-xl p-3 w-64 md:w-72 flex items-center gap-3 pointer-events-auto transform transition-all duration-500 hover:scale-105 ${isTopup ? 'border-red-300' : 'border-yellow-200'}`}
+            style={{ animation: 'slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}
+          >
+            <div className={`rounded-full w-10 h-10 flex items-center justify-center shrink-0 ${isTopup ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600'}`}>
+              <UtensilsCrossed className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <h4 className={`text-sm font-black ${isTopup ? 'text-red-700' : 'text-slate-800'}`}>{t.title}</h4>
+              <p className="text-[11px] text-slate-600 leading-tight mt-0.5 font-medium">{t.message}</p>
+            </div>
           </div>
-          <div className="flex-1">
-            <h4 className="text-sm font-black text-slate-800">{t.title}</h4>
-            <p className="text-[11px] text-slate-600 leading-tight mt-0.5 font-medium">{t.message}</p>
-          </div>
-        </div>
-      ))}
+        )
+      })}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes slideIn {
           from { transform: translateX(100%); opacity: 0; }

@@ -8,7 +8,8 @@ export const fetchCache = 'force-no-store'
 export const revalidate = 0
 
 export default async function Home() {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const jakartaTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }))
+  const todayStr = jakartaTime.toISOString().split('T')[0]
   
   // Fetch all data in parallel for much faster page loads!
   const [

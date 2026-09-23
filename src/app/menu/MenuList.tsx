@@ -166,7 +166,7 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
       p_deskripsi_addon: addonDesc,
       p_harga: selectedMenu.harga,
       p_harga_addon: addonPrice,
-      p_tanggal: new Date().toISOString().split('T')[0],
+      p_tanggal: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" })).toISOString().split('T')[0],
       p_tx_ket: txKet
     })
 

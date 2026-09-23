@@ -66,9 +66,10 @@ export default function UserLoginForm({ profiles }: { profiles: any[] }) {
       }
 
       // Success!
-      localStorage.removeItem('kantin_profile_id') // Bersihkan ID jika ada sisa dari percobaan sebelumnya
       localStorage.setItem('kantin_userName', profile.nama)
       localStorage.setItem('kantin_loginTime', Date.now().toString())
+      localStorage.setItem('kantin_profile_id', profile.id)
+      localStorage.setItem('kantin_divisi', profile.divisi || '')
       window.dispatchEvent(new Event('kantin_user_updated'))
       router.push('/')
       

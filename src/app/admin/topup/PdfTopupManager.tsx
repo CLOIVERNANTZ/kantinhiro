@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,9 @@ interface MutasiItem {
 export default function PdfTopupManager({ profiles }: { profiles: any[] }) {
   const [loading, setLoading] = useState(false)
   const [mutasiList, setMutasiList] = useState<MutasiItem[]>([])
+  // Debounce: require second click within 3s to confirm Approve
+  const [confirmingIndex, setConfirmingIndex] = useState<number | null>(null)
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -195,6 +198,23 @@ export default function PdfTopupManager({ profiles }: { profiles: any[] }) {
     setMutasiList(newList)
   }
 
+  // Two-click confirmation: first click arms it, second click within 3s fires it
+  const handleApproveClick = (idx: number) => {
+    if (confirmingIndex === idx) {
+      // Second click — execute
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+      setConfirmingIndex(null)
+      handleApprove(idx)
+    } else {
+      // First click — arm with 3s timeout
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+      setConfirmingIndex(idx)
+      confirmTimerRef.current = setTimeout(() => {
+        setConfirmingIndex(null)
+      }, 3000)
+    }
+  }
+
   return (
     <div className="space-y-6">
       
@@ -310,10 +330,10 @@ export default function PdfTopupManager({ profiles }: { profiles: any[] }) {
                 {item.status === 'ready' && (
                   <Button 
                     size="sm"
-                    className="bg-yellow-500 hover:bg-yellow-600 font-bold h-7 text-[11px] px-3 w-full sm:w-auto"
-                    onClick={() => handleApprove(idx)}
+                    className={`font-bold h-7 text-[11px] px-3 w-full sm:w-auto transition-all ${confirmingIndex === idx ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-yellow-500 hover:bg-yellow-600'}`}
+                    onClick={() => handleApproveClick(idx)}
                   >
-                    Approve
+                    {confirmingIndex === idx ? '⚠️ Klik lagi untuk konfirmasi' : 'Approve'}
                   </Button>
                 )}
                 {item.status === 'processing' && (

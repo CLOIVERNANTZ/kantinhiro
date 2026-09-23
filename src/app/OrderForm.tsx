@@ -68,7 +68,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastMeal, setLastMeal] = useState<{ date: string, items: any[] } | null>(null)
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" })).toISOString().split('T')[0]
   
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyTx, setHistoryTx] = useState<any[]>([])
@@ -220,16 +220,16 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     setIsSubmitting(true)
 
     try {
-      // Create an order for EACH checked menu or addon
-      const newOrders: any[] = []
+      // --- PRE-BUILD all payloads first to fail fast before touching DB ---
+      const payloads: any[] = []
       for (const itemId of checkedItems) {
         const isMenu = menus.find(x => x.id === itemId)
         const isAddon = addons.find(x => x.id === itemId)
         if (!isMenu && !isAddon) continue
-        
+
         const note = itemNotes[itemId] || ''
         let m_id = null, a_id = null, price = 0, txKet = ''
-        
+
         if (isMenu) {
           m_id = isMenu.id
           price = isMenu.harga
@@ -241,8 +241,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         }
 
         if (note) txKet += ` (${note})`
-
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('process_order', {
+        payloads.push({
           p_profile_id: p_id,
           p_menu_id: m_id,
           p_addon_id: a_id,
@@ -253,10 +252,30 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           p_tanggal: todayStr,
           p_tx_ket: txKet
         })
+      }
 
-        if (rpcErr) throw rpcErr
+      if (payloads.length === 0) {
+        showAlert({ title: "Perhatian", message: "Tidak ada item valid untuk dipesan.", type: "warning" })
+        return
+      }
 
-        // Fetch newly created order to update UI locally
+      // --- EXECUTE all RPCs; if ANY fails, rollback all already-created orders ---
+      const createdOrderIds: string[] = []
+      const newOrders: any[] = []
+
+      for (const payload of payloads) {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('process_order', payload)
+
+        if (rpcErr) {
+          // ROLLBACK: cancel all orders that already succeeded
+          for (const id of createdOrderIds) {
+            await supabase.rpc('cancel_user_order', { p_order_id: id })
+          }
+          throw rpcErr
+        }
+
+        createdOrderIds.push(rpcData.order_id)
+
         const { data: newOrder, error: fetchErr } = await supabase
           .from('kantin_orders')
           .select(`*, kantin_profiles(nama, saldo), kantin_menus(nama, kode_unik), kantin_addons(nama)`)
@@ -268,16 +287,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         }
       }
 
-      // Update state
+      // All succeeded
       setOrders(prev => [...newOrders, ...prev])
       setCheckedItems([])
       setItemNotes({})
       router.refresh()
       showAlert({ title: "Berhasil", message: "Pesanan Anda berhasil dibuat!", type: "success" })
-      
-      // Update local profile balance if possible (approximate, actual is in DB)
       window.dispatchEvent(new Event('kantin_user_updated'))
-      
+
     } catch (e: any) {
       showAlert({ title: "Gagal", message: "Gagal memproses pesanan: " + e.message, type: "error" })
     } finally {
