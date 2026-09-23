@@ -6,6 +6,7 @@ import { Coffee, Settings, FileText, LayoutDashboard, UtensilsCrossed } from "lu
 import Greeting from "@/components/Greeting";
 import AdminNav from "@/components/AdminNav";
 import { AppDialogProvider } from "@/components/AppDialogProvider";
+import GlobalOrderToaster from "@/components/GlobalOrderToaster";
 
 const nunito = Nunito({
   subsets: ["latin"],
@@ -54,6 +55,7 @@ export default function RootLayout({
           <main className="flex-1 container mx-auto px-4 py-8">
             {children}
           </main>
+          <GlobalOrderToaster />
         </AppDialogProvider>
       </body>
     </html>
