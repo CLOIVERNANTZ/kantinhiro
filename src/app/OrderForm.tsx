@@ -503,7 +503,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pb-24 lg:pb-0">
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pb-24 lg:pb-0">
       {/* LEFT COLUMN: WARTEG SELECTION */}
       <div className="lg:col-span-7 xl:col-span-8 space-y-4">
         
@@ -990,6 +991,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           </div>
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   )
 }

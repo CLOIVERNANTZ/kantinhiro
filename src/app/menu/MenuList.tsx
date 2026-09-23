@@ -10,10 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { supabase } from '@/lib/supabase'
 import { useMemo, useEffect } from 'react'
-import { Search } from 'lucide-react'
+import { Search, ShoppingBag } from 'lucide-react'
 import { useAppDialog } from '@/components/AppDialogProvider'
 
-export default function MenuList({ menus, addons, profiles }: { menus: any[], addons: any[], profiles: any[] }) {
+export default function MenuList({ menus, addons, profiles, orders }: { menus: any[], addons: any[], profiles: any[], orders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
   const [selectedMenu, setSelectedMenu] = useState<any>(null)
   const [isOpen, setIsOpen] = useState(false)
@@ -239,12 +239,106 @@ export default function MenuList({ menus, addons, profiles }: { menus: any[], ad
     return groups
   }, [filteredMenus])
 
+  // Group all today's orders
+  const groupedOrders = useMemo(() => {
+    if (!orders) return []
+    const map = new Map<string, any[]>()
+    orders.forEach(o => {
+      if (o.status === 'dibatalkan') return
+      const nama = o.kantin_profiles?.nama || o.nama_user || 'Unknown'
+      if (!map.has(nama)) map.set(nama, [])
+      map.get(nama)!.push(o)
+    })
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [orders])
+
+  const handleSamain = async (nama: string, userOrders: any[]) => {
+    if (!activeProfile) {
+      showAlert({ title: "Sesi Habis", message: "Silakan login terlebih dahulu.", type: "error" })
+      return
+    }
+
+    const confirm = await showConfirm({
+      title: "Samain Pesanan?",
+      message: `Anda akan langsung memesan makanan yang sama persis dengan yang dipesan oleh ${nama}.\n\nLanjutkan pesanan?`
+    })
+
+    if (!confirm) return
+
+    let successCount = 0
+    let lastError = null
+    for (const o of userOrders) {
+       const txKetName = o.kantin_menus?.nama || o.kantin_addons?.nama || 'Item'
+       const notes = o.deskripsi_pesanan || o.deskripsi_addon ? ` (${o.deskripsi_pesanan || o.deskripsi_addon})` : ''
+       const { error } = await supabase.rpc('process_order', {
+         p_profile_id: activeProfile.id,
+         p_menu_id: o.menu_id,
+         p_addon_id: o.addon_id,
+         p_deskripsi_pesanan: o.deskripsi_pesanan || '',
+         p_deskripsi_addon: o.deskripsi_addon || '',
+         p_harga: o.harga || 0,
+         p_harga_addon: o.harga_addon || 0,
+         p_tanggal: o.tanggal,
+         p_tx_ket: txKetName + notes
+       })
+       if (!error) {
+         successCount++
+       } else {
+         lastError = error.message
+       }
+    }
+
+    if (successCount > 0) {
+      showAlert({ title: "Berhasil", message: `${successCount} pesanan berhasil ditambahkan!`, type: "success" })
+      setTimeout(() => window.location.reload(), 2000)
+    } else {
+      showAlert({ title: "Gagal", message: "Gagal menambahkan pesanan: " + (lastError || 'Unknown error'), type: "error" })
+    }
+  }
+
   if (authChecking) {
     return <div className="min-h-[50vh] flex items-center justify-center">Memeriksa sesi...</div>
   }
 
   return (
     <div className="space-y-6">
+      {groupedOrders.length > 0 && (
+        <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-200 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>
+          <h2 className="font-black text-sm lg:text-base text-slate-800 mb-3 border-b border-slate-100 pb-2 flex items-center gap-2">
+            <ShoppingBag className="w-4 h-4 text-yellow-600" />
+            Rekap Pesanan Hari Ini
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3">
+            {groupedOrders.map(([nama, userOrders]) => (
+               <div key={nama} className="text-sm flex flex-col justify-start pb-2 border-b border-slate-50 last:border-0 md:[&:nth-last-child(-n+2)]:border-0">
+                 <div className="flex items-center gap-2 mb-1">
+                   <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-[11px]">{nama}</span>
+                   <Button 
+                     variant="outline" 
+                     size="sm" 
+                     className="h-5 text-[9px] px-2 py-0 border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-full"
+                     onClick={() => handleSamain(nama, userOrders)}
+                   >
+                     Samain
+                   </Button>
+                 </div>
+                 <ul className="list-disc pl-5 text-slate-600 text-[11px] lg:text-xs space-y-0.5">
+                   {userOrders.map(o => (
+                     <li key={o.id}>
+                       {o.kantin_menus?.nama || o.kantin_addons?.nama}
+                       {(o.deskripsi_pesanan || o.deskripsi_addon) && (
+                         <span className="italic text-slate-400"> ({o.deskripsi_pesanan || o.deskripsi_addon})</span>
+                       )}
+                     </li>
+                   ))}
+                 </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Search Bar - Sticky at Top */}
       <div className="sticky top-0 z-20 bg-white/90 backdrop-blur-md py-3 -mx-4 px-4 md:mx-0 md:px-0 border-b md:border-b-0 border-yellow-200">
         <div className="relative max-w-lg mx-auto md:mx-0 shadow-sm rounded-full">

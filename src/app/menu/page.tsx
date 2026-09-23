@@ -4,15 +4,30 @@ import MenuList from './MenuList'
 export const revalidate = 0 // Disable caching for now
 
 export default async function MenuPage() {
+  const now = new Date()
+  const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
+  const todayStr = jakartaTime.toISOString().split('T')[0]
+
   // Fetch all data in parallel!
   const [
     { data: menus, error: menuError },
     { data: addons, error: addonError },
-    { data: profiles, error: profileError }
+    { data: profiles, error: profileError },
+    { data: orders, error: ordersError }
   ] = await Promise.all([
     supabase.from('kantin_menus').select('*').order('nama'),
     supabase.from('kantin_addons').select('*').order('kategori'),
-    supabase.from('kantin_profiles').select('*').order('nama')
+    supabase.from('kantin_profiles').select('*').order('nama'),
+    supabase
+      .from('kantin_orders')
+      .select(`
+        *,
+        kantin_profiles(nama),
+        kantin_menus(nama, kode_unik, jam_tutup),
+        kantin_addons(nama)
+      `)
+      .eq('tanggal', todayStr)
+      .order('created_at', { ascending: false })
   ])
 
   if (menuError) {
@@ -45,6 +60,7 @@ export default async function MenuPage() {
         menus={menus || []} 
         addons={addons || []} 
         profiles={profiles || []} 
+        orders={orders || []}
       />
     </div>
   )
