@@ -23,18 +23,35 @@ export default function GlobalOrderToaster() {
         (payload) => {
           const newOrder = payload.new
           const nama = newOrder.nama_user || 'Seseorang'
-          
-          const toastId = Math.random().toString()
-          setToasts(prev => [...prev, {
-            id: toastId,
-            title: "Pesanan Baru Masuk! 🍜",
-            message: `${nama} baru saja menambahkan pesanan hari ini.`
-          }])
+          const menuId = newOrder.menu_id
+          const addonId = newOrder.addon_id
 
-          // Auto remove after 5 seconds
-          setTimeout(() => {
-            setToasts(prev => prev.filter(t => t.id !== toastId))
-          }, 5000)
+          const showToast = (foodName: string) => {
+            const toastId = Math.random().toString()
+            setToasts(prev => [...prev, {
+              id: toastId,
+              title: "Pesanan Baru Masuk! 🍜",
+              message: `${nama} telah berhasil memesan ${foodName}.`
+            }])
+
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+              setToasts(prev => prev.filter(t => t.id !== toastId))
+            }, 5000)
+          }
+
+          // Fetch the exact food name because Realtime only sends the UUID
+          if (menuId) {
+             supabase.from('kantin_menus').select('nama').eq('id', menuId).single().then(({data}) => {
+                showToast(data?.nama || 'Makanan')
+             })
+          } else if (addonId) {
+             supabase.from('kantin_addons').select('nama').eq('id', addonId).single().then(({data}) => {
+                showToast(data?.nama || 'Tambahan')
+             })
+          } else {
+             showToast('Pesanan')
+          }
         }
       )
       .subscribe()
