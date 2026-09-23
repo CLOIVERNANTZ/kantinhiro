@@ -203,7 +203,6 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
     setAddons(addons.filter(a => a.id !== id))
   }
 
-  // Toggle Buka/Tutup Grup
   const toggleGroupActive = async (groupCode: string, items: any[]) => {
     const isCurrentlyActive = items.some(item => item.is_active !== false)
     const newStatus = !isCurrentlyActive
@@ -213,12 +212,36 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
     const { error } = await supabase
       .from('kantin_menus')
       .update({ is_active: newStatus })
-      .like('kode_unik', `${groupCode}%`)
+      .like('kode_unik', `${groupCode}-%`)
       
     if (error) {
       alert("Gagal merubah status grup: " + error.message)
     } else {
-      setMenus(menus.map(m => m.kode_unik.startsWith(groupCode) ? { ...m, is_active: newStatus } : m))
+      setMenus(menus.map(m => m.kode_unik.startsWith(groupCode + '-') ? { ...m, is_active: newStatus } : m))
+    }
+  }
+
+  // Rename Group
+  const handleRenameGroup = async (oldGroup: string) => {
+    const newGroup = prompt(`Masukkan nama baru untuk grup ${oldGroup} (Gunakan huruf besar & tanpa spasi, contoh: WARTEG):`, oldGroup)
+    if (!newGroup || newGroup.trim().toUpperCase() === oldGroup) return
+    
+    const formatted = newGroup.trim().toUpperCase().replace(/\s+/g, '')
+    const toUpdate = menus.filter(m => m.kode_unik.startsWith(oldGroup + '-'))
+    
+    if (toUpdate.length === 0) return
+
+    try {
+      await Promise.all(
+        toUpdate.map(m => {
+          const newCode = m.kode_unik.replace(`${oldGroup}-`, `${formatted}-`)
+          return supabase.from('kantin_menus').update({ kode_unik: newCode }).eq('id', m.id)
+        })
+      )
+      alert(`Grup berhasil diubah menjadi ${formatted}! Memuat ulang...`)
+      window.location.reload()
+    } catch(err: any) {
+      alert("Gagal merubah grup: " + err.message)
     }
   }
 
@@ -317,6 +340,9 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => copyWAGantiPesanan(code)} className="h-7 text-xs gap-1 border-blue-200 text-blue-600 hover:bg-blue-50">
                       Copy WA Batal
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleRenameGroup(code)} className="h-7 text-xs gap-1 border-yellow-300 text-yellow-700 hover:bg-yellow-50">
+                      <Edit className="h-3 w-3" /> Ganti Nama
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => toggleGroupActive(code, items)} className={`h-7 text-xs gap-1 ${isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
                       {isActive ? 'Tutup Grup' : 'Buka Grup'}
