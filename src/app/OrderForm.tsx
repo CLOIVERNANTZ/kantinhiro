@@ -205,15 +205,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
     }
 
-    // Hanya peringatan hutang, biarkan pesan
+    // BLOCK JIKA SALDO SUDAH MINUS
     if (activeProfile.saldo < 0) {
-      const proceed = await showConfirm({
-        title: "Peringatan Tunggakan",
-        message: `INFO: Anda masih memiliki tunggakan/minus sebesar Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}.\n\nApakah Anda tetap ingin melanjutkan pesanan ini?`,
-        confirmText: "Ya, Lanjutkan",
-        variant: "destructive"
+      showAlert({
+        title: "Pemesanan Ditolak",
+        message: `Saldo Anda minus (Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}).\nHarap selesaikan pembayaran sebelumnya untuk memesan kembali.`,
+        type: "error"
       })
-      if (!proceed) return
+      return
     }
 
     setIsSubmitting(true)
@@ -321,14 +320,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
     }
 
+    // BLOCK JIKA SALDO SUDAH MINUS
     if (activeProfile.saldo < 0) {
-      const debtProceed = await showConfirm({
-        title: "Peringatan Tunggakan",
-        message: `INFO: Anda masih memiliki tunggakan/minus sebesar Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}.\n\nApakah Anda tetap ingin melanjutkan pesanan ini?`,
-        confirmText: "Ya, Lanjutkan",
-        variant: "destructive"
+      showAlert({
+        title: "Pemesanan Ditolak",
+        message: `Saldo Anda minus (Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}).\nHarap selesaikan pembayaran sebelumnya untuk memesan kembali.`,
+        type: "error"
       })
-      if (!debtProceed) return
+      return
     }
 
     setIsSubmitting(true)

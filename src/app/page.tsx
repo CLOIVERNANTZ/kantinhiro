@@ -3,7 +3,9 @@ import OrderForm from './OrderForm'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
 
-export const revalidate = 0 // Disable caching
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+export const revalidate = 0
 
 export default async function Home() {
   const todayStr = new Date().toISOString().split('T')[0]

@@ -3,6 +3,8 @@ import RekapanClient from './RekapanClient'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
 
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 export const revalidate = 0
 
 export default async function RekapanPage() {
