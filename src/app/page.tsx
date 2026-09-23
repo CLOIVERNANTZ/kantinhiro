@@ -33,12 +33,7 @@ export default async function Home() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-xl font-bold text-yellow-800">Pemesanan Makanan</h1>
-          <p className="text-xs text-slate-500">{formattedDate}</p>
-        </div>
-      </div>
+      {/* Title area removed as requested */}
 
       <OrderForm 
         profiles={profiles || []} 

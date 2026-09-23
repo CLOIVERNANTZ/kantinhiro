@@ -25,8 +25,10 @@ export default function UserLoginForm({ profiles }: { profiles: any[] }) {
   const [newPin, setNewPin] = useState('')
 
   useEffect(() => {
-    // Check if already logged in
-    if (localStorage.getItem('kantin_profile_id')) {
+    // Check if already logged in (using new userName standard)
+    const savedName = localStorage.getItem('kantin_userName')
+    const loginTime = localStorage.getItem('kantin_loginTime')
+    if (savedName && loginTime && (Date.now() - parseInt(loginTime)) <= 3600000) {
       router.replace('/')
     }
   }, [router])

@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
 import { AlertCircle, Image as ImageIcon, ShoppingBag, Trash2, KeyRound } from 'lucide-react'
+import { format } from 'date-fns'
+import { id } from 'date-fns/locale'
 
 export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
   const [orders, setOrders] = useState(initialOrders)
@@ -35,6 +37,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     if (!savedName || !loginTime || (Date.now() - parseInt(loginTime)) > 3600000) {
       localStorage.removeItem('kantin_userName')
       localStorage.removeItem('kantin_loginTime')
+      localStorage.removeItem('kantin_profile_id')
       window.location.href = '/login'
       return
     }
@@ -46,6 +49,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       setAuthChecking(false)
     } else {
       localStorage.removeItem('kantin_userName')
+      localStorage.removeItem('kantin_loginTime')
+      localStorage.removeItem('kantin_profile_id')
       window.location.href = '/login'
     }
   }, [profiles])
@@ -423,7 +428,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
               </div>
               <div>
                 <p className="text-sm font-black text-slate-800">{activeProfile?.nama}</p>
-                <p className="text-[10px] text-slate-500">{activeProfile?.divisi || 'Tanpa Divisi'}</p>
+                <p className="text-[10px] text-slate-500">{activeProfile?.divisi || 'Tanpa Divisi'} • {format(new Date(), 'EEEE, dd MMM yyyy', { locale: id })}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -755,76 +760,84 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
               >
                 {isSubmitting ? 'Memproses...' : 'Pesan Sekarang'}
               </Button>
+
+              <Dialog>
+                <DialogTrigger 
+                  render={
+                    <Button variant="outline" className="w-full mt-3 h-10 border-yellow-200 text-yellow-700 bg-yellow-50/50 hover:bg-yellow-100 font-bold" />
+                  }
+                >
+                  <ShoppingBag className="w-4 h-4 mr-2" />
+                  Lihat Pesanan Saya ({myOrders.length})
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Pesanan Saya Hari Ini</DialogTitle>
+                  </DialogHeader>
+                  <div className="mt-4">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 hover:bg-slate-50">
+                          <TableHead className="text-xs font-bold text-slate-500 h-8">MENU</TableHead>
+                          <TableHead className="text-right text-xs font-bold text-slate-500 h-8">HARGA</TableHead>
+                          <TableHead className="w-[40px] h-8"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {myOrders.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-center text-xs text-slate-400 py-6">
+                              Belum ada pesanan hari ini.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          myOrders.map(order => (
+                            <TableRow key={order.id} className="hover:bg-slate-50/50">
+                              <TableCell className="py-2 px-2">
+                                <div className="text-sm font-semibold text-slate-800 line-clamp-2 leading-tight flex flex-col gap-1">
+                                  <span>{order.kantin_menus?.nama || order.kantin_addons?.nama || 'Item'}</span>
+                                  {order.status === 'selesai' && <span className="w-fit text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Selesai</span>}
+                                  {order.status === 'dibatalkan' && <span className="w-fit text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Habis / Batal</span>}
+                                  {order.status === 'pending' && <span className="w-fit text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Menunggu</span>}
+                                </div>
+                                {(order.deskripsi_pesanan || order.deskripsi_addon) && (
+                                  <div className="text-xs text-slate-500 mt-1 italic">"{order.deskripsi_pesanan || order.deskripsi_addon}"</div>
+                                )}
+                                {order.admin_note && (
+                                  <div className="text-[10px] text-red-600 font-bold mt-1 bg-red-50 p-1.5 rounded italic border border-red-100">
+                                    Pesan Admin: {order.admin_note}
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right py-2 px-2 align-top pt-2.5">
+                                <div className="text-sm font-bold text-yellow-700 whitespace-nowrap">
+                                  {((order.harga || 0) + (order.harga_addon || 0)).toLocaleString('id-ID')}
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-2 pr-2 text-right align-top pt-1.5">
+                                {order.status === 'pending' && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                    onClick={() => handleDelete(order.id)}
+                                    title="Batalkan / Hapus"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </Card>
         </div>
-
-        {/* User's Order History Today */}
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="bg-slate-50 p-3 border-b border-slate-100">
-            <CardTitle className="text-sm font-bold text-slate-700">Pesanan Saya Hari Ini</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="w-[120px] text-[10px] font-bold text-slate-500 h-8">MENU</TableHead>
-                  <TableHead className="text-right text-[10px] font-bold text-slate-500 h-8">HARGA</TableHead>
-                  <TableHead className="w-[40px] h-8"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {myOrders.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-xs text-slate-400 py-6">
-                      Belum ada pesanan hari ini.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  myOrders.map(order => (
-                    <TableRow key={order.id} className="hover:bg-slate-50/50">
-                      <TableCell className="py-2 px-2">
-                        <div className="text-xs font-semibold text-slate-800 line-clamp-2 leading-tight flex flex-col gap-1">
-                          <span>{order.kantin_menus?.nama || order.kantin_addons?.nama || 'Item'}</span>
-                          {order.status === 'selesai' && <span className="w-fit text-[8px] bg-green-100 text-green-700 px-1 py-0.5 rounded font-bold uppercase tracking-wider">Selesai</span>}
-                          {order.status === 'dibatalkan' && <span className="w-fit text-[8px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold uppercase tracking-wider">Habis / Batal</span>}
-                          {order.status === 'pending' && <span className="w-fit text-[8px] bg-slate-100 text-slate-500 px-1 py-0.5 rounded font-bold uppercase tracking-wider">Menunggu</span>}
-                        </div>
-                        {(order.deskripsi_pesanan || order.deskripsi_addon) && (
-                          <div className="text-[9px] text-slate-500 mt-1 line-clamp-1 italic">"{order.deskripsi_pesanan || order.deskripsi_addon}"</div>
-                        )}
-                        {order.admin_note && (
-                          <div className="text-[10px] text-red-600 font-bold mt-1 bg-red-50 p-1 rounded italic border border-red-100">
-                            Pesan Admin: {order.admin_note}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right py-2 px-2 align-top pt-2.5">
-                        <div className="text-xs font-bold text-yellow-700 whitespace-nowrap">
-                          {((order.harga || 0) + (order.harga_addon || 0)).toLocaleString('id-ID')}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-2 pr-2 text-right align-top pt-1.5">
-                        {order.status === 'pending' && (
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-6 w-6 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                            onClick={() => handleDelete(order.id)}
-                            title="Batalkan / Hapus"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
       </div>
     </div>
   )

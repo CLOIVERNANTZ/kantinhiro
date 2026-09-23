@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
-import { Settings, LogOut, LogIn } from 'lucide-react'
+import { Settings, LogOut, Shield } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 export default function AdminNav() {
@@ -43,9 +43,8 @@ export default function AdminNav() {
           </button>
         </>
       ) : (
-        <Link href="/admin/login" className="text-sm font-semibold text-slate-600 hover:text-blue-600 flex items-center gap-2">
-          <LogIn className="h-4 w-4" />
-          <span>Login Admin</span>
+        <Link href="/admin/login" className="text-slate-400 hover:text-yellow-600 flex items-center justify-center rounded-full p-2 hover:bg-yellow-50 transition-colors" title="Admin Login">
+          <Shield className="h-5 w-5" />
         </Link>
       )}
     </div>
