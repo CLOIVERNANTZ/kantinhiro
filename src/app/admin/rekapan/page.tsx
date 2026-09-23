@@ -9,16 +9,26 @@ export default async function RekapanPage() {
   const todayStr = new Date().toISOString().split('T')[0]
   
   // Fetch today's orders with all relations
-  const { data: orders, error } = await supabase
-    .from('kantin_orders')
-    .select(`
-      id, deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status, is_recap_checked, menu_id, addon_id, profile_id, admin_note, created_at,
-      kantin_profiles(nama),
-      kantin_menus(nama, kode_unik),
-      kantin_addons(nama)
-    `)
-    .eq('tanggal', todayStr)
-  
+  const [
+    { data: orders, error },
+    { data: profiles },
+    { data: menus },
+    { data: addons }
+  ] = await Promise.all([
+    supabase
+      .from('kantin_orders')
+      .select(`
+        id, deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status, is_recap_checked, menu_id, addon_id, profile_id, admin_note, created_at,
+        kantin_profiles(nama),
+        kantin_menus(nama, kode_unik),
+        kantin_addons(nama)
+      `)
+      .eq('tanggal', todayStr),
+    supabase.from('kantin_profiles').select('id, nama').order('nama'),
+    supabase.from('kantin_menus').select('*').eq('is_active', true).order('nama'),
+    supabase.from('kantin_addons').select('*').eq('is_active', true).order('nama')
+  ])
+
   const formattedDate = format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id })
 
   if (error) {
@@ -34,7 +44,12 @@ export default async function RekapanPage() {
         </div>
       </div>
       
-      <RekapanClient initialOrders={orders || []} />
+      <RekapanClient 
+        initialOrders={orders || []} 
+        profiles={profiles || []}
+        menus={menus || []}
+        addons={addons || []}
+      />
     </div>
   )
 }

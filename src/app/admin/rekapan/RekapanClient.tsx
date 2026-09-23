@@ -62,7 +62,11 @@ const AdminNoteCell = ({ initialValue, onSave, isChecked }: { initialValue: stri
   )
 }
 
-export default function RekapanClient({ initialOrders }: { initialOrders: any[] }) {
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+
+export default function RekapanClient({ initialOrders, profiles, menus, addons }: { initialOrders: any[], profiles?: any[], menus?: any[], addons?: any[] }) {
   const [orders, setOrders] = useState(initialOrders)
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
 
@@ -190,6 +194,54 @@ export default function RekapanClient({ initialOrders }: { initialOrders: any[] 
     return str
   }
 
+  // Manual Order State
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualUser, setManualUser] = useState('')
+  const [manualMenu, setManualMenu] = useState('')
+  const [manualDesc, setManualDesc] = useState('')
+  const [isSubmittingManual, setIsSubmittingManual] = useState(false)
+
+  const handleManualOrder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualUser || !manualMenu) {
+      alert("Pilih user dan menu!")
+      return
+    }
+
+    setIsSubmittingManual(true)
+    try {
+      const selectedMenuObj = menus?.find(m => m.id === manualMenu)
+      if (!selectedMenuObj) throw new Error("Menu tidak valid")
+
+      const txKet = `${selectedMenuObj.nama} ${manualDesc ? '(' + manualDesc + ')' : ''} [MANUAL ADMIN]`
+
+      const { error: rpcErr } = await supabase.rpc('process_order', {
+        p_profile_id: manualUser,
+        p_menu_id: manualMenu,
+        p_addon_id: null,
+        p_deskripsi_pesanan: manualDesc,
+        p_deskripsi_addon: '',
+        p_harga: selectedMenuObj.harga,
+        p_harga_addon: 0,
+        p_tanggal: selectedDate, // order on the selected date!
+        p_tx_ket: txKet,
+        p_bypass_time_check: true
+      })
+
+      if (rpcErr) throw rpcErr
+
+      alert("Pesanan manual berhasil ditambahkan!")
+      setManualOpen(false)
+      
+      // Refresh page to load new data
+      window.location.reload()
+    } catch (err: any) {
+      alert("Gagal menambahkan: " + err.message)
+    } finally {
+      setIsSubmittingManual(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -202,9 +254,64 @@ export default function RekapanClient({ initialOrders }: { initialOrders: any[] 
             className="h-9 font-bold text-yellow-800 bg-yellow-50 border-yellow-200"
           />
         </div>
-        <Button onClick={handleCopyWA} variant="outline" className="flex gap-2 font-bold text-slate-700">
-          <Copy className="h-4 w-4" /> Copy for WhatsApp
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setManualOpen(true)} className="bg-yellow-500 hover:bg-yellow-600 font-bold text-white">
+            + Pesanan Manual
+          </Button>
+          <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Pesanan Manual (Admin)</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleManualOrder} className="space-y-4 mt-2">
+                <div className="space-y-2">
+                  <Label>Pemesan</Label>
+                  <Select value={manualUser} onValueChange={(v) => setManualUser(v || '')} required>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih user..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[200px]">
+                      {profiles?.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.nama}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Pilih Menu</Label>
+                  <Select value={manualMenu} onValueChange={(v) => setManualMenu(v || '')} required>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih menu makanan..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[200px]">
+                      {menus?.map(m => (
+                        <SelectItem key={m.id} value={m.id}>{m.kode_unik} - {m.nama} (Rp {m.harga.toLocaleString('id-ID')})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Deskripsi / Keterangan (Opsional)</Label>
+                  <Input 
+                    placeholder="Contoh: Pedas, dipisah, dll" 
+                    value={manualDesc}
+                    onChange={(e) => setManualDesc(e.target.value)}
+                  />
+                </div>
+                
+                <Button type="submit" disabled={isSubmittingManual} className="w-full bg-yellow-500 hover:bg-yellow-600 font-bold">
+                  {isSubmittingManual ? 'Menyimpan...' : 'Simpan Pesanan Manual'}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          <Button onClick={handleCopyWA} variant="outline" className="flex gap-2 font-bold text-slate-700">
+            <Copy className="h-4 w-4" /> Copy for WhatsApp
+          </Button>
+        </div>
       </div>
 
       <Card>

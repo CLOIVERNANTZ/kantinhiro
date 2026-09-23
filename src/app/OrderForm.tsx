@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
 import { AlertCircle, Image as ImageIcon, ShoppingBag, Trash2, KeyRound } from 'lucide-react'
 import { format } from 'date-fns'
@@ -67,6 +67,9 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastMeal, setLastMeal] = useState<{ date: string, items: any[] } | null>(null)
   const todayStr = new Date().toISOString().split('T')[0]
+  
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyTx, setHistoryTx] = useState<any[]>([])
 
   useEffect(() => {
     if (!activeProfile?.id) return
@@ -479,6 +482,18 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     return orders.filter(o => o.kantin_profiles?.nama === activeProfile.nama)
   }, [orders, activeProfile])
 
+  const openHistory = async () => {
+    if (!activeProfile?.id) return
+    const { data } = await supabase
+      .from('kantin_transactions')
+      .select('*')
+      .eq('profile_id', activeProfile.id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    setHistoryTx(data || [])
+    setHistoryOpen(true)
+  }
+
   if (authChecking) {
     return <div className="min-h-[50vh] flex items-center justify-center">Memeriksa sesi...</div>
   }
@@ -597,14 +612,24 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
               ) : (
                 <span className="text-sm font-black text-green-600">Rp {(activeProfile?.saldo || 0).toLocaleString('id-ID')}</span>
               )}
-              <Button 
-                variant="outline" 
-                size="sm"
-                className="absolute right-2 top-1/2 -translate-y-1/2 h-6 text-[10px] px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50"
-                onClick={() => window.location.href = '/topup'}
-              >
-                Top Up
-              </Button>
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="h-6 text-[10px] px-2 bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                  onClick={openHistory}
+                >
+                  History
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="h-6 text-[10px] px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50"
+                  onClick={() => window.location.href = '/topup'}
+                >
+                  Top Up
+                </Button>
+              </div>
             </div>
 
             {lastMeal && lastMeal.items.length > 0 ? (
@@ -932,6 +957,35 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         </Card>
         </div>
       </div>
+
+      {/* History Dialog */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Riwayat Transaksi</DialogTitle>
+            <DialogDescription>
+              Menampilkan 20 transaksi (pesanan & top up) terakhir Anda.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            {historyTx.length === 0 ? (
+              <p className="text-center text-sm text-slate-500 py-8">Belum ada riwayat transaksi.</p>
+            ) : (
+              historyTx.map(tx => (
+                <div key={tx.id} className="flex justify-between items-center p-3 border rounded-lg bg-slate-50">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{tx.keterangan || 'Transaksi'}</p>
+                    <p className="text-xs text-slate-500">{new Date(tx.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                  </div>
+                  <div className={`text-sm font-bold ${tx.tipe === 'pemasukan' ? 'text-green-600' : 'text-red-600'}`}>
+                    {tx.tipe === 'pemasukan' ? '+' : '-'} Rp {tx.jumlah.toLocaleString('id-ID')}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
