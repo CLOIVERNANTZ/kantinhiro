@@ -718,59 +718,63 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       <div className="lg:col-span-5 xl:col-span-4 space-y-4">
         
         {/* Sticky Mobile/Desktop Cart Button */}
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] lg:sticky lg:top-24 lg:p-0 lg:border-0 lg:shadow-none lg:bg-transparent z-50">
+        <div className="fixed bottom-0 left-0 right-0 p-2 bg-white border-t border-slate-200 shadow-[0_-10px_20px_rgba(0,0,0,0.1)] lg:sticky lg:top-24 lg:p-0 lg:border-0 lg:shadow-none lg:bg-transparent z-50">
           <Card className="border-yellow-200 shadow-lg lg:shadow-sm overflow-hidden">
-            <div className="bg-yellow-500 p-3 text-white flex justify-between items-center">
-              <div className="flex items-center gap-2 font-bold">
-                <ShoppingBag className="h-5 w-5" />
-                <span>Total Keranjang</span>
+            <div className="bg-yellow-500 p-2 lg:p-3 text-white flex justify-between items-center">
+              <div className="flex items-center gap-1.5 lg:gap-2 font-bold text-xs lg:text-base">
+                <ShoppingBag className="h-4 w-4 lg:h-5 lg:w-5" />
+                <span>Total Keranjang {checkedItems.length > 0 && `(${checkedItems.length})`}</span>
               </div>
-              <div className="text-lg font-black">
+              <div className="text-sm lg:text-lg font-black">
                 Rp {totalPrice.toLocaleString('id-ID')}
               </div>
             </div>
-            <div className="p-3 bg-white">
-              {checkedItems.length > 0 ? (
-                <div className="mb-3 max-h-[160px] overflow-y-auto space-y-2 border-b border-slate-100 pb-3 pr-1">
-                  {checkedItems.map(id => {
-                    const item = menus.find(m => m.id === id) || addons.find(a => a.id === id)
-                    if (!item) return null
-                    return (
-                      <div key={id} className="flex justify-between items-start text-xs">
-                        <div className="flex-1 pr-2">
-                          <p className="font-bold text-slate-700 leading-tight">{item.nama}</p>
-                          {itemNotes[id] && <p className="text-[10px] text-slate-500 italic mt-0.5">"{itemNotes[id]}"</p>}
+            <div className="p-2 lg:p-3 bg-white">
+              <div className="hidden lg:block">
+                {checkedItems.length > 0 ? (
+                  <div className="mb-3 max-h-[160px] overflow-y-auto space-y-2 border-b border-slate-100 pb-3 pr-1">
+                    {checkedItems.map(id => {
+                      const item = menus.find(m => m.id === id) || addons.find(a => a.id === id)
+                      if (!item) return null
+                      return (
+                        <div key={id} className="flex justify-between items-start text-xs">
+                          <div className="flex-1 pr-2">
+                            <p className="font-bold text-slate-700 leading-tight">{item.nama}</p>
+                            {itemNotes[id] && <p className="text-[10px] text-slate-500 italic mt-0.5">"{itemNotes[id]}"</p>}
+                          </div>
+                          <div className="font-bold text-yellow-700 shrink-0">
+                            {item.harga.toLocaleString('id-ID')}
+                          </div>
                         </div>
-                        <div className="font-bold text-yellow-700 shrink-0">
-                          {item.harga.toLocaleString('id-ID')}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="text-xs text-slate-500 mb-3 text-center">
-                  Belum ada menu yang dipilih.
-                </p>
-              )}
-              <Button 
-                onClick={handleOrder}
-                disabled={checkedItems.length === 0 || isSubmitting}
-                className="w-full h-12 font-bold text-base bg-yellow-500 hover:bg-yellow-600 text-white"
-              >
-                {isSubmitting ? 'Memproses...' : 'Pesan Sekarang'}
-              </Button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 mb-3 text-center">
+                    Belum ada menu yang dipilih.
+                  </p>
+                )}
+              </div>
 
-              <Dialog>
-                <DialogTrigger 
-                  render={
-                    <Button variant="outline" className="w-full mt-3 h-10 border-yellow-200 text-yellow-700 bg-yellow-50/50 hover:bg-yellow-100 font-bold" />
-                  }
+              <div className="flex flex-row lg:flex-col gap-2">
+                <Button 
+                  onClick={handleOrder}
+                  disabled={checkedItems.length === 0 || isSubmitting}
+                  className="flex-1 h-10 lg:h-12 font-bold text-xs lg:text-base bg-yellow-500 hover:bg-yellow-600 text-white"
                 >
-                  <ShoppingBag className="w-4 h-4 mr-2" />
-                  Lihat Pesanan Saya ({myOrders.length})
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+                  {isSubmitting ? 'Proses...' : 'Pesan Sekarang'}
+                </Button>
+
+                <Dialog>
+                  <DialogTrigger 
+                    render={
+                      <Button variant="outline" className="flex-1 h-10 border-yellow-200 text-yellow-700 bg-yellow-50/50 hover:bg-yellow-100 font-bold text-[11px] lg:text-sm px-1 lg:px-4 lg:mt-1" />
+                    }
+                  >
+                    <ShoppingBag className="w-3 h-3 lg:w-4 lg:h-4 mr-1 lg:mr-2" />
+                    Pesanan Saya ({myOrders.length})
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>Pesanan Saya Hari Ini</DialogTitle>
                   </DialogHeader>
@@ -836,7 +840,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                 </DialogContent>
               </Dialog>
             </div>
-          </Card>
+          </div>
+        </Card>
         </div>
       </div>
     </div>
