@@ -4,16 +4,16 @@ import KeuanganClient from './KeuanganClient'
 export const revalidate = 0
 
 export default async function AdminKeuanganPage() {
-  const { data: profiles, error } = await supabase
-    .from('kantin_profiles')
-    .select('*')
-    .order('nama')
-
-  // Fetch recent orders for 'menu terakhir'
-  const { data: recentOrders } = await supabase
-    .from('kantin_orders')
-    .select('*, kantin_menus(nama), kantin_addons(nama)')
-    .order('created_at', { ascending: false })
+  const [
+    { data: profiles, error },
+    { data: recentOrders }
+  ] = await Promise.all([
+    supabase.from('kantin_profiles').select('*').order('nama'),
+    supabase
+      .from('kantin_orders')
+      .select('*, kantin_menus(nama), kantin_addons(nama)')
+      .order('created_at', { ascending: false })
+  ])
 
   if (error) {
     return <div className="p-4 text-red-500">Gagal memuat data profil.</div>

@@ -4,23 +4,16 @@ import MenuList from './MenuList'
 export const revalidate = 0 // Disable caching for now
 
 export default async function MenuPage() {
-  // Fetch menus
-  const { data: menus, error: menuError } = await supabase
-    .from('kantin_menus')
-    .select('*')
-    .order('nama')
-  
-  // Fetch addons
-  const { data: addons, error: addonError } = await supabase
-    .from('kantin_addons')
-    .select('*')
-    .order('kategori')
-    
-  // Fetch profiles for the dropdown
-  const { data: profiles, error: profileError } = await supabase
-    .from('kantin_profiles')
-    .select('*')
-    .order('nama')
+  // Fetch all data in parallel!
+  const [
+    { data: menus, error: menuError },
+    { data: addons, error: addonError },
+    { data: profiles, error: profileError }
+  ] = await Promise.all([
+    supabase.from('kantin_menus').select('*').order('nama'),
+    supabase.from('kantin_addons').select('*').order('kategori'),
+    supabase.from('kantin_profiles').select('*').order('nama')
+  ])
 
   if (menuError) {
     console.error(menuError)

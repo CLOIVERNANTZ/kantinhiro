@@ -4,8 +4,13 @@ import MenuManager from './MenuManager'
 export const revalidate = 0
 
 export default async function AdminMenusPage() {
-  const { data: menus, error: menuErr } = await supabase.from('kantin_menus').select('*').order('kode_unik')
-  const { data: addons, error: addonErr } = await supabase.from('kantin_addons').select('*').order('nama')
+  const [
+    { data: menus, error: menuErr },
+    { data: addons, error: addonErr }
+  ] = await Promise.all([
+    supabase.from('kantin_menus').select('*').order('kode_unik'),
+    supabase.from('kantin_addons').select('*').order('nama')
+  ])
 
   if (menuErr || addonErr) {
     return <div className="p-4 text-red-500">Gagal memuat data menu/addons dari database.</div>
