@@ -312,13 +312,13 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4 md:space-y-8">
       {/* ── Menu Utama ── */}
       <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-slate-700">🍽️ Menu Utama</h2>
-          <Button onClick={openNewGroup} className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white font-semibold text-sm">
-            <PlusCircle className="h-4 w-4" /> Grup Baru
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm md:text-lg font-bold text-slate-700">🍽️ Menu Utama</h2>
+          <Button onClick={openNewGroup} className="flex items-center gap-1.5 bg-yellow-500 hover:bg-yellow-600 text-white font-semibold text-xs md:text-sm h-8 md:h-9 px-3">
+            <PlusCircle className="h-3.5 w-3.5" /> Grup Baru
           </Button>
         </div>
 
@@ -330,24 +330,26 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
               const isActive = items.some(item => item.is_active !== false)
               return (
               <Card key={code} className={`border-yellow-100 ${!isActive ? 'opacity-70' : ''}`}>
-                <CardHeader className="bg-yellow-50/60 p-3 pb-2 flex flex-row items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <CardHeader className="bg-yellow-50/60 px-3 py-2 space-y-2">
+                  {/* Row 1: Group name */}
+                  <div className="flex items-center gap-2">
                     <CardTitle className="text-sm font-bold text-yellow-800 font-mono">
-                      {code} <span className="text-xs text-slate-500 font-normal ml-2">({items.length} item)</span>
+                      {code} <span className="text-xs text-slate-500 font-normal ml-1">({items.length} item)</span>
                     </CardTitle>
-                    {!isActive && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded">TUTUP</span>}
+                    {!isActive && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">TUTUP</span>}
                   </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => copyWAGantiPesanan(code)} className="h-7 text-xs gap-1 border-blue-200 text-blue-600 hover:bg-blue-50">
+                  {/* Row 2: Action buttons — wrap on mobile */}
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button size="sm" variant="outline" onClick={() => copyWAGantiPesanan(code)} className="h-7 text-[11px] px-2 gap-1 border-blue-200 text-blue-600 hover:bg-blue-50">
                       Copy WA Batal
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleRenameGroup(code)} className="h-7 text-xs gap-1 border-yellow-300 text-yellow-700 hover:bg-yellow-50">
+                    <Button size="sm" variant="outline" onClick={() => handleRenameGroup(code)} className="h-7 text-[11px] px-2 gap-1 border-yellow-300 text-yellow-700 hover:bg-yellow-50">
                       <Edit className="h-3 w-3" /> Ganti Nama
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => toggleGroupActive(code, items)} className={`h-7 text-xs gap-1 ${isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
+                    <Button size="sm" variant="outline" onClick={() => toggleGroupActive(code, items)} className={`h-7 text-[11px] px-2 gap-1 ${isActive ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
                       {isActive ? 'Tutup Grup' : 'Buka Grup'}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => openAddToGroup(code)} className="h-7 text-xs gap-1 bg-white">
+                    <Button size="sm" variant="outline" onClick={() => openAddToGroup(code)} className="h-7 text-[11px] px-2 gap-1 bg-white font-semibold">
                       <Plus className="h-3 w-3" /> Tambah Item
                     </Button>
                   </div>
