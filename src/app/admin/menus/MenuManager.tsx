@@ -353,6 +353,7 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader className="bg-slate-50/50">
                       <TableRow>
@@ -404,6 +405,7 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
                       })}
                     </TableBody>
                   </Table>
+                  </div>
                 </CardContent>
               </Card>
               )
@@ -422,6 +424,7 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
         </div>
         <Card>
           <CardContent className="p-0">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader className="bg-slate-50">
                 <TableRow>
@@ -475,6 +478,7 @@ export default function MenuManager({ initialMenus, initialAddons }: { initialMe
                 ))}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       </div>

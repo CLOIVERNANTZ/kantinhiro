@@ -303,27 +303,27 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
   return (
     <div className="space-y-6">
       {groupedOrders.length > 0 && (
-        <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-200 relative overflow-hidden">
+        <div className="bg-white rounded-xl px-3 py-3 md:px-5 md:py-4 shadow-sm border border-slate-200 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>
-          <h2 className="font-black text-sm lg:text-base text-slate-800 mb-3 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <ShoppingBag className="w-4 h-4 text-yellow-600" />
+          <h2 className="font-black text-xs md:text-sm text-slate-800 mb-2.5 border-b border-slate-100 pb-2 flex items-center gap-2 pl-1">
+            <ShoppingBag className="w-3.5 h-3.5 text-yellow-600" />
             Rekap Pesanan Hari Ini
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
             {groupedOrders.map(([nama, userOrders]) => (
-               <div key={nama} className="text-sm flex flex-col justify-start pb-2 border-b border-slate-50 last:border-0 md:[&:nth-last-child(-n+2)]:border-0">
-                 <div className="flex items-center gap-2 mb-1">
-                   <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-[11px]">{nama}</span>
+               <div key={nama} className="text-sm flex flex-col justify-start pb-2 border-b border-slate-50 last:border-0">
+                 <div className="flex items-center gap-1.5 mb-1">
+                   <span className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[10px] md:text-[11px] truncate max-w-[90px]">{nama}</span>
                    <Button 
                      variant="outline" 
                      size="sm" 
-                     className="h-5 text-[9px] px-2 py-0 border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-full"
+                     className="h-4 text-[8px] px-1.5 py-0 border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-full shrink-0"
                      onClick={() => handleSamain(nama, userOrders)}
                    >
                      Samain
                    </Button>
                  </div>
-                 <ul className="list-disc pl-5 text-slate-600 text-[11px] lg:text-xs space-y-0.5">
+                 <ul className="list-disc pl-4 text-slate-600 text-[10px] md:text-[11px] space-y-0.5">
                    {userOrders.map(o => (
                      <li key={o.id}>
                        {o.kantin_menus?.nama || o.kantin_addons?.nama}
@@ -339,62 +339,62 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
         </div>
       )}
 
-      {/* Search Bar - Sticky at Top */}
-      <div className="sticky top-0 z-20 bg-white/90 backdrop-blur-md py-3 -mx-4 px-4 md:mx-0 md:px-0 border-b md:border-b-0 border-yellow-200">
+      {/* Search Bar */}
+      <div className="sticky top-12 md:top-14 z-20 bg-white/90 backdrop-blur-md py-2 -mx-3 px-3 md:mx-0 md:px-0 border-b border-yellow-100">
         <div className="relative max-w-lg mx-auto md:mx-0 shadow-sm rounded-full">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input 
             type="text"
-            placeholder="Cari menu favorit Anda..." 
+            placeholder="Cari menu..." 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-11 h-12 bg-white rounded-full border-yellow-300 focus-visible:ring-yellow-500 text-base"
+            className="pl-9 h-9 md:h-11 bg-white rounded-full border-yellow-300 focus-visible:ring-yellow-500 text-sm md:text-base"
           />
         </div>
       </div>
 
-      <div className="space-y-10">
+      <div className="space-y-6 md:space-y-10">
         {Object.keys(groupedMenus).length === 0 ? (
-          <p className="text-slate-500">Tidak ada menu yang cocok dengan pencarian Anda.</p>
+          <p className="text-sm text-slate-500">Tidak ada menu yang cocok.</p>
         ) : null}
 
         {Object.entries(groupedMenus).map(([groupName, groupItems]) => (
-          <div key={groupName} className="space-y-4">
-            {/* Category Header with Divider */}
-            <div className="flex items-center gap-4">
-              <h2 className="text-xl font-black text-yellow-800">{groupName}</h2>
+          <div key={groupName} className="space-y-3 md:space-y-4">
+            {/* Category Header */}
+            <div className="flex items-center gap-3">
+              <h2 className="text-base md:text-xl font-black text-yellow-800 whitespace-nowrap">{groupName}</h2>
               <div className="flex-1 h-[2px] bg-yellow-100 rounded-full"></div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
               {groupItems.map((menu) => {
                 const isTutup = menu.is_active === false
                 return (
         <Card key={menu.id} className={`overflow-hidden border-yellow-200 flex flex-col ${isTutup ? 'opacity-60 grayscale' : ''}`}>
           {menu.foto_url && (
-            <div className="h-48 w-full bg-slate-100">
+            <div className="h-32 md:h-48 w-full bg-slate-100">
               <img src={menu.foto_url} alt={menu.nama} className="object-cover w-full h-full" />
             </div>
           )}
-          <CardHeader>
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="flex gap-2 items-center">
-                  <CardTitle>{menu.nama}</CardTitle>
-                  {isTutup && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded">TUTUP</span>}
+          <CardHeader className="px-3 py-2 md:px-6 md:py-4">
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="flex gap-1.5 items-center">
+                  <CardTitle className="text-sm md:text-base leading-tight truncate">{menu.nama}</CardTitle>
+                  {isTutup && <span className="bg-red-100 text-red-700 text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0">TUTUP</span>}
                 </div>
-                <CardDescription className="font-mono mt-1 text-yellow-600 font-bold">{menu.kode_unik}</CardDescription>
+                <CardDescription className="font-mono mt-0.5 text-yellow-600 font-bold text-xs">{menu.kode_unik}</CardDescription>
               </div>
-              <span className="font-bold text-lg text-slate-700">Rp {menu.harga.toLocaleString('id-ID')}</span>
+              <span className="font-bold text-sm md:text-base text-slate-700 shrink-0">Rp {menu.harga.toLocaleString('id-ID')}</span>
             </div>
           </CardHeader>
-          <CardContent className="flex-1">
-            <p className="text-sm text-slate-600 line-clamp-3">{menu.deskripsi}</p>
+          <CardContent className="flex-1 px-3 py-0 md:px-6 md:py-2">
+            <p className="text-xs text-slate-600 line-clamp-2">{menu.deskripsi}</p>
             {menu.jam_tutup && (
-              <p className="text-xs text-red-500 font-semibold mt-2">Close: {menu.jam_tutup.substring(0, 5)}</p>
+              <p className="text-[10px] text-red-500 font-semibold mt-1">Close: {menu.jam_tutup.substring(0, 5)}</p>
             )}
           </CardContent>
-          <CardFooter>
+          <CardFooter className="px-3 py-2 md:px-6 md:py-4">
             <Dialog open={isOpen && selectedMenu?.id === menu.id} onOpenChange={(open) => {
               if (open && !isTutup) {
                 setSelectedMenu(menu)

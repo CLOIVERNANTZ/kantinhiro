@@ -316,6 +316,7 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
 
       <Card>
         <CardContent className="p-0">
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader className="bg-slate-50">
               <TableRow>
@@ -451,6 +452,7 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
               </TableRow>
             </TableFooter>
           </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

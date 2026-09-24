@@ -520,43 +520,42 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pb-24 lg:pb-0">
-      {/* LEFT COLUMN: WARTEG SELECTION */}
-      <div className="lg:col-span-7 xl:col-span-8 space-y-4">
+    <div className="space-y-3 md:space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 md:gap-6 items-start pb-32 lg:pb-0">
+      {/* LEFT COLUMN: MENU SELECTION */}
+      <div className="lg:col-span-7 xl:col-span-8 space-y-3">
         
         {/* PERSISTENT DEBT WARNING BANNER */}
         {activeProfile?.saldo < 0 && (
-          <div className="bg-red-600 text-white p-3 rounded-lg shadow-md border-2 border-red-700 animate-pulse">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-6 w-6 shrink-0 mt-0.5" />
+          <div className="bg-red-600 text-white p-2.5 md:p-3 rounded-lg shadow-md border-2 border-red-700 animate-pulse">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 md:h-5 md:w-5 shrink-0 mt-0.5" />
               <div>
-                <h3 className="font-black text-sm uppercase tracking-wider">PERINGATAN TUNGGAKAN!</h3>
-                <p className="text-xs mt-1 font-medium">
-                  Anda memiliki hutang sebesar <strong>Rp {Math.abs(activeProfile.saldo).toLocaleString('id-ID')}</strong>. 
-                  Anda tetap bisa memesan, namun <strong>pesanan Anda mungkin TIDAK AKAN DIPROSES / DIANTARKAN</strong> hingga tunggakan ini dilunasi!
+                <h3 className="font-black text-xs uppercase tracking-wider">PERINGATAN TUNGGAKAN!</h3>
+                <p className="text-[11px] md:text-xs mt-0.5 font-medium">
+                  Hutang <strong>Rp {Math.abs(activeProfile.saldo).toLocaleString('id-ID')}</strong>. Pesanan mungkin tidak diproses sampai lunasi!
                 </p>
-                <a href="/topup" className="inline-block mt-2 bg-white text-red-700 px-3 py-1 text-xs font-bold rounded hover:bg-red-50">
-                  Top-Up Sekarang ↗
+                <a href="/topup" className="inline-block mt-1.5 bg-white text-red-700 px-2.5 py-0.5 text-[11px] font-bold rounded hover:bg-red-50">
+                  Top-Up ↗
                 </a>
               </div>
             </div>
           </div>
         )}
 
-        {/* User Info Bar */}
-        <div className="bg-white shadow-sm border border-yellow-200 p-3 rounded-lg flex flex-col gap-3">
-          <div className="flex justify-between items-start">
-            <div className="flex items-center gap-3">
-              <div className="bg-yellow-100 text-yellow-700 w-10 h-10 flex items-center justify-center rounded-full font-bold text-lg shrink-0">
+        {/* User Info Bar — compact */}
+        <div className="bg-white shadow-sm border border-yellow-200 p-2.5 md:p-3 rounded-lg">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <div className="bg-yellow-100 text-yellow-700 w-8 h-8 md:w-9 md:h-9 flex items-center justify-center rounded-full font-bold text-sm md:text-base shrink-0">
                 {activeProfile?.nama?.charAt(0).toUpperCase()}
               </div>
               <div>
-                <p className="text-sm font-black text-slate-800">{activeProfile?.nama}</p>
-                <p className="text-[10px] text-slate-500">{activeProfile?.divisi || 'Tanpa Divisi'} • {format(new Date(), 'EEEE, dd MMM yyyy', { locale: id })}</p>
+                <p className="text-xs md:text-sm font-black text-slate-800 leading-tight">{activeProfile?.nama}</p>
+                <p className="text-[10px] text-slate-400 leading-tight">{activeProfile?.divisi || 'Tanpa Divisi'}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               <Dialog open={showPinModal} onOpenChange={setShowPinModal}>
                 <DialogTrigger 
                   render={
@@ -621,32 +620,35 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                   window.location.href = '/login'
                 }}
               >
-                Logout
+                Keluar
               </Button>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 mt-1">
-            <div className="bg-slate-50 p-2 rounded flex flex-col justify-center border border-slate-100 relative">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Saldo Anda</span>
-              {activeProfile?.saldo < 0 ? (
-                <span className="text-sm font-black text-red-600">- Rp {Math.abs(activeProfile?.saldo).toLocaleString('id-ID')}</span>
-              ) : (
-                <span className="text-sm font-black text-green-600">Rp {(activeProfile?.saldo || 0).toLocaleString('id-ID')}</span>
-              )}
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+          {/* Saldo + Last Meal row */}
+          <div className="grid grid-cols-2 gap-1.5 mt-2 pt-2 border-t border-slate-100">
+            <div className="bg-slate-50 px-2.5 py-1.5 rounded-lg flex items-center justify-between border border-slate-100">
+              <div>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Saldo</span>
+                {activeProfile?.saldo < 0 ? (
+                  <span className="text-xs font-black text-red-600">-Rp {Math.abs(activeProfile?.saldo).toLocaleString('id-ID')}</span>
+                ) : (
+                  <span className="text-xs font-black text-green-600">Rp {(activeProfile?.saldo || 0).toLocaleString('id-ID')}</span>
+                )}
+              </div>
+              <div className="flex gap-1">
                 <Button 
                   variant="outline" 
                   size="sm"
-                  className="h-6 text-[10px] px-2 bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                  className="h-5 text-[9px] px-1.5 bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
                   onClick={openHistory}
                 >
-                  History
+                  Hist
                 </Button>
                 <Button 
                   variant="outline" 
                   size="sm"
-                  className="h-6 text-[10px] px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50"
+                  className="h-5 text-[9px] px-1.5 bg-white text-blue-600 border-blue-200 hover:bg-blue-50"
                   onClick={() => window.location.href = '/topup'}
                 >
                   Top Up
@@ -656,36 +658,34 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
             {lastMeal && lastMeal.items.length > 0 ? (
               <div 
-                className="bg-yellow-50 p-2 rounded flex flex-col justify-center border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors"
+                className="bg-yellow-50 px-2.5 py-1.5 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors"
                 onClick={handleReorder}
               >
-                <span className="text-[9px] font-bold text-yellow-700 uppercase tracking-wider mb-0.5">
-                  Ulangi Pesanan ({lastMeal.date})
-                </span>
+                <span className="text-[9px] font-bold text-yellow-700 uppercase tracking-wider block">↩ Ulangi ({lastMeal.date})</span>
                 <span className="text-[10px] font-bold text-yellow-900 line-clamp-1">
                   {lastMeal.items.map(i => i.kantin_menus?.nama || i.kantin_addons?.nama).join(', ')}
                 </span>
               </div>
             ) : (
-              <div className="bg-slate-50 p-2 rounded flex flex-col justify-center border border-slate-100">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Pesanan Terakhir</span>
-                <span className="text-[10px] font-bold text-slate-500 italic">Belum ada riwayat</span>
+              <div className="bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Pesanan Terakhir</span>
+                <span className="text-[10px] font-bold text-slate-400 italic">Belum ada riwayat</span>
               </div>
             )}
           </div>
         </div>
 
         {/* Group & Addon Selectors */}
-        <div className="grid grid-cols-2 gap-3 sticky top-16 z-20">
-          <Card className="border-yellow-200 shadow-md">
-            <CardHeader className="p-2 bg-yellow-50 border-b border-yellow-100">
-              <CardTitle className="text-[11px] font-bold text-yellow-800 uppercase tracking-wider text-center">
-                Pilih Menu Utama
+        <div className="grid grid-cols-2 gap-2 sticky top-12 md:top-14 z-20">
+          <Card className="border-yellow-200 shadow-sm">
+            <CardHeader className="p-1.5 md:p-2 bg-yellow-50 border-b border-yellow-100">
+              <CardTitle className="text-[10px] md:text-[11px] font-bold text-yellow-800 uppercase tracking-wider text-center">
+                Menu Utama
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-2">
+            <CardContent className="p-1.5 md:p-2">
               <Select value={selectedGroup} onValueChange={(val) => val && setSelectedGroup(val)}>
-                <SelectTrigger className="h-10 bg-white text-xs font-bold">
+                <SelectTrigger className="h-8 md:h-10 bg-white text-xs font-bold">
                   <SelectValue placeholder="Pilih..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -698,16 +698,16 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
             </CardContent>
           </Card>
           
-          <Card className="border-blue-200 shadow-md">
-            <CardHeader className="p-2 bg-blue-50 border-b border-blue-100">
-              <CardTitle className="text-[11px] font-bold text-blue-800 uppercase tracking-wider text-center">
-                Pilih Add-On
+          <Card className="border-blue-200 shadow-sm">
+            <CardHeader className="p-1.5 md:p-2 bg-blue-50 border-b border-blue-100">
+              <CardTitle className="text-[10px] md:text-[11px] font-bold text-blue-800 uppercase tracking-wider text-center">
+                Add-On
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-2">
+            <CardContent className="p-1.5 md:p-2">
               <Select value={selectedAddonCategory} onValueChange={(val) => val && setSelectedAddonCategory(val)}>
-                <SelectTrigger className="h-10 bg-white text-xs font-bold">
-                  <SelectValue placeholder="Pilih Add-on..." />
+                <SelectTrigger className="h-8 md:h-10 bg-white text-xs font-bold">
+                  <SelectValue placeholder="Pilih..." />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
@@ -723,12 +723,12 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         {/* Menu Items Checkboxes */}
         {selectedGroup && selectedGroup !== 'none' && (
           <div className="bg-white rounded-lg border border-yellow-200 overflow-hidden shadow-sm">
-            <div className="p-3 bg-yellow-50 border-b border-yellow-200 font-bold text-yellow-800 text-sm">
+            <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 font-bold text-yellow-800 text-xs md:text-sm">
               Makanan Utama: {selectedGroup}
             </div>
             <div className="divide-y divide-yellow-100">
               {currentGroupMenus.length === 0 ? (
-                <p className="p-4 text-center text-sm text-slate-500">Tidak ada menu di kelompok ini.</p>
+                <p className="p-4 text-center text-xs text-slate-500">Tidak ada menu di kelompok ini.</p>
               ) : (
                 currentGroupMenus.map(menu => {
                   // @ts-ignore
@@ -739,45 +739,45 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                   return (
                     <div key={menu.id} className="transition-colors hover:bg-slate-50">
                       <div 
-                        className={`p-3 flex items-center gap-3 ${isChecked ? 'bg-yellow-50/50' : ''} ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+                        className={`px-3 py-2 flex items-center gap-2 md:gap-3 ${isChecked ? 'bg-yellow-50/50' : ''} ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
                         onClick={() => toggleItem(menu.id, isHabis, isTutup)}
                       >
                         <Checkbox 
                           checked={isChecked} 
-                          className={`h-5 w-5 border-yellow-400 data-[state=checked]:bg-yellow-500 ${isHabis ? 'opacity-50' : ''}`}
+                          className={`h-4 w-4 md:h-5 md:w-5 border-yellow-400 data-[state=checked]:bg-yellow-500 ${isHabis ? 'opacity-50' : ''} shrink-0`}
                           onCheckedChange={() => toggleItem(menu.id, isHabis, isTutup)}
                           onClick={e => e.stopPropagation()}
                           disabled={isHabis}
                         />
                         
                         {menu.foto_url ? (
-                          <img src={menu.foto_url} alt={menu.nama} className="w-12 h-12 object-cover rounded-md border bg-white shrink-0" />
+                          <img src={menu.foto_url} alt={menu.nama} className="w-9 h-9 md:w-11 md:h-11 object-cover rounded border bg-white shrink-0" />
                         ) : (
-                          <div className="w-12 h-12 bg-slate-100 text-slate-400 flex items-center justify-center rounded-md shrink-0">
-                            <ImageIcon className="h-5 w-5" />
+                          <div className="w-9 h-9 md:w-11 md:h-11 bg-slate-100 text-slate-400 flex items-center justify-center rounded shrink-0">
+                            <ImageIcon className="h-4 w-4" />
                           </div>
                         )}
 
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className={`font-bold text-sm truncate ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+                          <div className="flex items-center gap-1.5">
+                            <p className={`font-bold text-xs md:text-sm truncate ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
                               {menu.nama}
                             </p>
-                            {isHabis && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">Habis</span>}
-                            {isTutup && !isHabis && <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">Tutup</span>}
+                            {isHabis && <span className="text-[8px] md:text-[9px] bg-slate-200 text-slate-600 px-1 py-0.5 rounded font-bold uppercase shrink-0">Habis</span>}
+                            {isTutup && !isHabis && <span className="text-[8px] md:text-[9px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold uppercase shrink-0">Tutup</span>}
                           </div>
-                          <p className="text-xs text-yellow-600 font-bold mt-0.5">Rp {menu.harga.toLocaleString('id-ID')}</p>
+                          <p className="text-[10px] md:text-xs text-yellow-600 font-bold">Rp {menu.harga.toLocaleString('id-ID')}</p>
                         </div>
                       </div>
                       
                       {/* Per-Item Note */}
                       {isChecked && (
-                        <div className="pl-[3.25rem] pr-3 pb-3 pt-1">
+                        <div className="pl-9 md:pl-12 pr-3 pb-2 pt-0.5">
                           <Input 
-                            placeholder="Catatan (opsional)... cth: pedas, tambah kuah" 
+                            placeholder="Catatan... cth: pedas, tambah kuah" 
                             value={itemNotes[menu.id] || ''}
                             onChange={e => setItemNotes(prev => ({...prev, [menu.id]: e.target.value}))}
-                            className="h-8 text-[11px] bg-white border-yellow-300 focus-visible:ring-yellow-500 shadow-sm"
+                            className="h-7 text-[11px] bg-white border-yellow-300 focus-visible:ring-yellow-500"
                           />
                         </div>
                       )}
@@ -791,13 +791,13 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
         {/* Addons Items Checkboxes */}
         {selectedAddonCategory && selectedAddonCategory !== 'none' && (
-          <div className="bg-white rounded-lg border border-blue-200 overflow-hidden shadow-sm mt-4">
-            <div className="p-3 bg-blue-50 border-b border-blue-200 font-bold text-blue-800 text-sm">
+          <div className="bg-white rounded-lg border border-blue-200 overflow-hidden shadow-sm">
+            <div className="px-3 py-2 bg-blue-50 border-b border-blue-200 font-bold text-blue-800 text-xs md:text-sm">
               Add-On: {selectedAddonCategory}
             </div>
             <div className="divide-y divide-blue-100">
               {addons.filter(a => a.kategori === selectedAddonCategory).length === 0 ? (
-                <p className="p-4 text-center text-sm text-slate-500">Tidak ada add-on.</p>
+                <p className="p-4 text-center text-xs text-slate-500">Tidak ada add-on.</p>
               ) : (
                 addons.filter(a => a.kategori === selectedAddonCategory).map(addon => {
                   // @ts-ignore
@@ -807,36 +807,36 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                   return (
                     <div key={addon.id} className="transition-colors hover:bg-slate-50">
                       <div 
-                        className={`p-3 flex items-center gap-3 ${isChecked ? 'bg-blue-50/50' : ''} ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+                        className={`px-3 py-2 flex items-center gap-2 md:gap-3 ${isChecked ? 'bg-blue-50/50' : ''} ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
                         onClick={() => toggleItem(addon.id, isHabis, false)}
                       >
                         <Checkbox 
                           checked={isChecked} 
-                          className={`h-5 w-5 border-blue-400 data-[state=checked]:bg-blue-600 ${isHabis ? 'opacity-50' : ''}`}
+                          className={`h-4 w-4 md:h-5 md:w-5 border-blue-400 data-[state=checked]:bg-blue-600 ${isHabis ? 'opacity-50' : ''} shrink-0`}
                           onCheckedChange={() => toggleItem(addon.id, isHabis, false)}
                           onClick={e => e.stopPropagation()}
                           disabled={isHabis}
                         />
                         
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className={`font-bold text-sm truncate ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+                          <div className="flex items-center gap-1.5">
+                            <p className={`font-bold text-xs md:text-sm truncate ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
                               {addon.nama}
                             </p>
-                            {isHabis && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">Habis</span>}
+                            {isHabis && <span className="text-[8px] md:text-[9px] bg-slate-200 text-slate-600 px-1 py-0.5 rounded font-bold uppercase shrink-0">Habis</span>}
                           </div>
-                          <p className="text-xs text-blue-600 font-bold mt-0.5">Rp {addon.harga.toLocaleString('id-ID')}</p>
+                          <p className="text-[10px] md:text-xs text-blue-600 font-bold">Rp {addon.harga.toLocaleString('id-ID')}</p>
                         </div>
                       </div>
                       
                       {/* Per-Item Note */}
                       {isChecked && (
-                        <div className="pl-11 pr-3 pb-3 pt-1">
+                        <div className="pl-7 md:pl-9 pr-3 pb-2 pt-0.5">
                           <Input 
-                            placeholder="Catatan (opsional)... cth: es sedikit" 
+                            placeholder="Catatan... cth: es sedikit" 
                             value={itemNotes[addon.id] || ''}
                             onChange={e => setItemNotes(prev => ({...prev, [addon.id]: e.target.value}))}
-                            className="h-8 text-[11px] bg-white border-blue-300 focus-visible:ring-blue-500 shadow-sm"
+                            className="h-7 text-[11px] bg-white border-blue-300 focus-visible:ring-blue-500"
                           />
                         </div>
                       )}
@@ -849,53 +849,52 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         )}
       </div>
 
-      {/* RIGHT COLUMN: REKAPAN & MOBILE STICKY CART */}
-      <div className="lg:col-span-5 xl:col-span-4 space-y-4">
+      {/* RIGHT / MOBILE STICKY CART */}
+      <div className="lg:col-span-5 xl:col-span-4 space-y-3">
         
-        {/* Sticky Mobile/Desktop Cart Button */}
-        <div className="fixed bottom-0 left-0 right-0 p-0 lg:sticky lg:top-24 lg:p-0 z-50">
-          <Card className="border-yellow-200 shadow-[0_-10px_20px_rgba(0,0,0,0.15)] rounded-none lg:rounded-xl lg:shadow-sm overflow-hidden">
-            <div className="bg-yellow-500 p-2 px-3 lg:p-3 text-white flex justify-between items-center">
-              <div className="flex items-center gap-1.5 lg:gap-2 font-bold text-xs lg:text-base">
-                <ShoppingBag className="h-4 w-4 lg:h-5 lg:w-5" />
-                <span>Total Keranjang {checkedItems.length > 0 && `(${checkedItems.length})`}</span>
+        <div className="fixed bottom-0 left-0 right-0 lg:static lg:bottom-auto z-50">
+          <Card className="border-yellow-200 shadow-[0_-6px_16px_rgba(0,0,0,0.12)] rounded-none lg:rounded-xl lg:shadow-sm overflow-hidden">
+            {/* Cart header bar */}
+            <div className="bg-yellow-500 px-3 py-2 md:py-2.5 text-white flex justify-between items-center">
+              <div className="flex items-center gap-1.5 font-bold text-xs md:text-sm">
+                <ShoppingBag className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                <span>Keranjang {checkedItems.length > 0 && `(${checkedItems.length})`}</span>
               </div>
-              <div className="text-sm lg:text-lg font-black">
+              <div className="text-sm md:text-base font-black">
                 Rp {totalPrice.toLocaleString('id-ID')}
               </div>
             </div>
-            <div className="p-2 px-3 lg:p-3 bg-white">
-              <div className="block">
-                {checkedItems.length > 0 ? (
-                  <div className="mb-2 max-h-[80px] lg:max-h-[160px] overflow-y-auto space-y-1.5 lg:space-y-2 border-b border-slate-100 pb-2 pr-1">
-                    {checkedItems.map(id => {
-                      const item = menus.find(m => m.id === id) || addons.find(a => a.id === id)
-                      if (!item) return null
-                      return (
-                        <div key={id} className="flex justify-between items-start text-[11px] lg:text-xs">
-                          <div className="flex-1 pr-2">
-                            <p className="font-bold text-slate-700 leading-tight">{item.nama}</p>
-                            {itemNotes[id] && <p className="text-[9px] lg:text-[10px] text-slate-500 italic mt-0.5">"{itemNotes[id]}"</p>}
-                          </div>
-                          <div className="font-bold text-yellow-700 shrink-0">
-                            {item.harga.toLocaleString('id-ID')}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-[11px] lg:text-xs text-slate-500 mb-2 text-center">
-                    Belum ada menu yang dipilih.
-                  </p>
-                )}
-              </div>
 
-              <div className="flex flex-row lg:flex-col gap-2">
+            <div className="px-3 py-2 bg-white">
+              {checkedItems.length > 0 ? (
+                <div className="mb-2 max-h-[60px] md:max-h-[120px] overflow-y-auto space-y-1 border-b border-slate-100 pb-2 pr-0.5">
+                  {checkedItems.map(id => {
+                    const item = menus.find(m => m.id === id) || addons.find(a => a.id === id)
+                    if (!item) return null
+                    return (
+                      <div key={id} className="flex justify-between items-start text-[10px] md:text-xs">
+                        <div className="flex-1 pr-2">
+                          <p className="font-bold text-slate-700 leading-tight">{item.nama}</p>
+                          {itemNotes[id] && <p className="text-[9px] text-slate-400 italic mt-0.5">"{itemNotes[id]}"</p>}
+                        </div>
+                        <div className="font-bold text-yellow-700 shrink-0 tabular-nums">
+                          {item.harga.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-[10px] md:text-xs text-slate-400 mb-2 text-center py-0.5">
+                  Belum ada menu dipilih.
+                </p>
+              )}
+
+              <div className="flex gap-2">
                 <Button 
                   onClick={handleOrder}
                   disabled={checkedItems.length === 0 || isSubmitting}
-                  className="flex-1 h-9 lg:h-12 font-bold text-[11px] lg:text-base bg-yellow-500 hover:bg-yellow-600 text-white"
+                  className="flex-1 h-8 md:h-10 font-bold text-xs md:text-sm bg-yellow-500 hover:bg-yellow-600 text-white"
                 >
                   {isSubmitting ? 'Proses...' : 'Pesan Sekarang'}
                 </Button>
@@ -903,11 +902,11 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                 <Dialog>
                   <DialogTrigger 
                     render={
-                      <Button variant="outline" className="flex-1 h-9 border-yellow-200 text-yellow-700 bg-yellow-50/50 hover:bg-yellow-100 font-bold text-[10px] lg:text-sm px-1 lg:px-4 lg:mt-1" />
+                      <Button variant="outline" className="h-8 md:h-10 border-yellow-200 text-yellow-700 bg-yellow-50/50 hover:bg-yellow-100 font-bold text-[10px] md:text-xs px-2 md:px-3" />
                     }
                   >
-                    <ShoppingBag className="w-3 h-3 lg:w-4 lg:h-4 mr-1 lg:mr-2" />
-                    Pesanan Saya ({myOrders.length})
+                    <ShoppingBag className="w-3 h-3 mr-1" />
+                    Saya ({myOrders.length})
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
                   <DialogHeader>
@@ -933,36 +932,36 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                           myOrders.map(order => (
                             <TableRow key={order.id} className="hover:bg-slate-50/50">
                               <TableCell className="py-2 px-2">
-                                <div className="text-sm font-semibold text-slate-800 line-clamp-2 leading-tight flex flex-col gap-1">
+                                <div className="text-xs font-semibold text-slate-800 leading-tight flex flex-col gap-0.5">
                                   <span>{order.kantin_menus?.nama || order.kantin_addons?.nama || 'Item'}</span>
-                                  {order.status === 'selesai' && <span className="w-fit text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Selesai</span>}
-                                  {order.status === 'dibatalkan' && <span className="w-fit text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Habis / Batal</span>}
-                                  {order.status === 'pending' && <span className="w-fit text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Menunggu</span>}
+                                  {order.status === 'selesai' && <span className="w-fit text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold uppercase">Selesai</span>}
+                                  {order.status === 'dibatalkan' && <span className="w-fit text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase">Batal</span>}
+                                  {order.status === 'pending' && <span className="w-fit text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase">Menunggu</span>}
                                 </div>
                                 {(order.deskripsi_pesanan || order.deskripsi_addon) && (
-                                  <div className="text-xs text-slate-500 mt-1 italic">"{order.deskripsi_pesanan || order.deskripsi_addon}"</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5 italic">"{order.deskripsi_pesanan || order.deskripsi_addon}"</div>
                                 )}
                                 {order.admin_note && (
-                                  <div className="text-[10px] text-red-600 font-bold mt-1 bg-red-50 p-1.5 rounded italic border border-red-100">
-                                    Pesan Admin: {order.admin_note}
+                                  <div className="text-[10px] text-red-600 font-bold mt-1 bg-red-50 p-1 rounded italic border border-red-100">
+                                    Admin: {order.admin_note}
                                   </div>
                                 )}
                               </TableCell>
-                              <TableCell className="text-right py-2 px-2 align-top pt-2.5">
-                                <div className="text-sm font-bold text-yellow-700 whitespace-nowrap">
+                              <TableCell className="text-right py-2 px-2 align-top pt-2">
+                                <div className="text-xs font-bold text-yellow-700 whitespace-nowrap tabular-nums">
                                   {((order.harga || 0) + (order.harga_addon || 0)).toLocaleString('id-ID')}
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2 pr-2 text-right align-top pt-1.5">
+                              <TableCell className="py-2 pr-1 text-right align-top">
                                 {order.status === 'pending' && (
                                   <Button 
                                     variant="ghost" 
                                     size="icon" 
-                                    className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                                    className="h-7 w-7 text-slate-400 hover:text-red-500 hover:bg-red-50"
                                     onClick={() => handleDelete(order.id)}
-                                    title="Batalkan / Hapus"
+                                    title="Batalkan"
                                   >
-                                    <Trash2 className="h-4 w-4" />
+                                    <Trash2 className="h-3.5 w-3.5" />
                                   </Button>
                                 )}
                               </TableCell>
@@ -986,7 +985,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           <DialogHeader>
             <DialogTitle>Riwayat Transaksi</DialogTitle>
             <DialogDescription>
-              Menampilkan 20 transaksi (pesanan & top up) terakhir Anda.
+              Menampilkan 20 transaksi terakhir Anda.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 mt-2">

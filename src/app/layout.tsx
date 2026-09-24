@@ -28,22 +28,22 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
         <AppDialogProvider>
           <header className="bg-white border-b border-yellow-200 sticky top-0 z-50">
-            <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-              <Link href="/" className="flex items-center gap-2 text-yellow-600 hover:text-yellow-700 transition-colors">
-                <Coffee className="h-6 w-6" />
-                <span className="font-bold text-xl">Kantin Hiro</span>
+            <div className="container mx-auto px-3 md:px-4 h-12 md:h-14 flex items-center justify-between">
+              <Link href="/" className="flex items-center gap-1.5 text-yellow-600 hover:text-yellow-700 transition-colors">
+                <Coffee className="h-5 w-5 md:h-6 md:w-6" />
+                <span className="font-bold text-base md:text-xl">Kantin Hiro</span>
               </Link>
 
               <div className="hidden md:block">
                 <Greeting />
               </div>
               
-              <nav className="flex items-center gap-6">
-                <Link href="/" className="text-sm font-semibold text-slate-600 hover:text-yellow-600 flex items-center gap-2">
+              <nav className="flex items-center gap-3 md:gap-6">
+                <Link href="/" className="text-xs md:text-sm font-semibold text-slate-600 hover:text-yellow-600 flex items-center gap-1 md:gap-2">
                   <UtensilsCrossed className="h-4 w-4" />
-                  <span>Pemesanan</span>
+                  <span>Pesan</span>
                 </Link>
-                <Link href="/menu" className="text-sm font-semibold text-slate-600 hover:text-yellow-600 flex items-center gap-2">
+                <Link href="/menu" className="text-xs md:text-sm font-semibold text-slate-600 hover:text-yellow-600 flex items-center gap-1 md:gap-2">
                   <LayoutDashboard className="h-4 w-4" />
                   <span>Menu</span>
                 </Link>
@@ -52,7 +52,7 @@ export default function RootLayout({
             </div>
           </header>
           
-          <main className="flex-1 container mx-auto px-4 py-8">
+          <main className="flex-1 container mx-auto px-3 md:px-4 py-3 md:py-6">
             {children}
           </main>
           <GlobalOrderToaster />

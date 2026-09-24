@@ -102,6 +102,7 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
       </div>
       <Card className="shadow-sm">
         <CardContent className="p-0">
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader className="bg-slate-50">
               <TableRow>
@@ -208,6 +209,7 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
           )}
           </TableBody>
         </Table>
+        </div>
       </CardContent>
     </Card>
     </div>

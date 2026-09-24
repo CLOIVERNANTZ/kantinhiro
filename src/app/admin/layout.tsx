@@ -91,9 +91,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   ]
 
   return (
-    <div className="space-y-6">
-      {/* Secondary Admin Navigation Tabs */}
-      <div className="bg-white border-b border-yellow-200 shadow-sm rounded-lg overflow-hidden">
+    <div className="space-y-3 md:space-y-6">
+      {/* Secondary Admin Navigation Tabs — sticky under main header */}
+      <div className="bg-white border-b border-yellow-200 shadow-sm rounded-lg overflow-hidden sticky top-12 md:top-14 z-40">
         <nav className="flex items-center">
           {tabs.map((tab) => {
             const isActive = pathname === tab.href
@@ -102,14 +102,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <Link 
                 key={tab.href}
                 href={tab.href}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors
+                className={`flex-1 flex items-center justify-center gap-1 py-2 md:py-3 text-xs md:text-sm font-semibold transition-colors
                   ${isActive 
                     ? 'bg-yellow-50 text-yellow-700 border-b-2 border-yellow-500' 
                     : 'text-slate-500 hover:text-yellow-600 hover:bg-slate-50'
                   }
                 `}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-3.5 w-3.5 md:h-4 md:w-4 shrink-0" />
                 <span className="hidden sm:inline">{tab.name}</span>
               </Link>
             )
@@ -119,12 +119,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <DialogTrigger 
               render={
                 <button 
-                  className="flex-none px-4 py-3 flex items-center justify-center gap-2 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors border-l border-yellow-200"
+                  className="flex-none px-3 md:px-4 py-2 md:py-3 flex items-center justify-center gap-1 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors border-l border-yellow-200"
                   title="Ubah Password Admin"
                 />
               }
             >
-              <KeyRound className="h-4 w-4" />
+              <KeyRound className="h-3.5 w-3.5 md:h-4 md:w-4" />
               <span className="hidden sm:inline">Ubah Sandi</span>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[425px]">
@@ -158,9 +158,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             onClick={async () => {
               await supabase.auth.signOut()
             }}
-            className="flex-none px-4 py-3 flex items-center justify-center gap-2 text-sm font-bold text-red-600 hover:bg-red-50 transition-colors border-l border-yellow-200"
+            className="flex-none px-3 md:px-4 py-2 md:py-3 flex items-center justify-center gap-1 text-xs font-bold text-red-600 hover:bg-red-50 transition-colors border-l border-yellow-200"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-3.5 w-3.5 md:h-4 md:w-4" />
             <span className="hidden sm:inline">Logout</span>
           </button>
         </nav>
