@@ -675,49 +675,39 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           </div>
         </div>
 
-        {/* Group & Addon Selectors */}
-        <div className="grid grid-cols-2 gap-2 sticky top-12 md:top-14 z-20">
-          <Card className="border-yellow-200 shadow-sm">
-            <CardHeader className="p-1.5 md:p-2 bg-yellow-50 border-b border-yellow-100">
-              <CardTitle className="text-[10px] md:text-[11px] font-bold text-yellow-800 uppercase tracking-wider text-center">
-                Menu Utama
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-1.5 md:p-2">
-              <Select value={selectedGroup} onValueChange={(val) => val && setSelectedGroup(val)}>
-                <SelectTrigger className="h-8 md:h-10 bg-white text-xs font-bold">
-                  <SelectValue placeholder="Pilih..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
-                  {menuGroups.map(grp => (
-                    <SelectItem key={grp} value={grp} className="font-semibold text-xs">{grp}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
-          
-          <Card className="border-blue-200 shadow-sm">
-            <CardHeader className="p-1.5 md:p-2 bg-blue-50 border-b border-blue-100">
-              <CardTitle className="text-[10px] md:text-[11px] font-bold text-blue-800 uppercase tracking-wider text-center">
-                Add-On
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-1.5 md:p-2">
-              <Select value={selectedAddonCategory} onValueChange={(val) => val && setSelectedAddonCategory(val)}>
-                <SelectTrigger className="h-8 md:h-10 bg-white text-xs font-bold">
-                  <SelectValue placeholder="Pilih..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
-                  {addonCategories.map(cat => (
-                    <SelectItem key={cat} value={cat} className="font-semibold text-xs">{cat}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
+        {/* Group & Addon Selectors — compact inline bar */}
+        <div className="flex gap-2 sticky top-12 md:top-14 z-20 bg-white/95 backdrop-blur-sm py-2 -mx-3 px-3 md:mx-0 md:px-0 border-b border-slate-100 shadow-sm">
+          {/* Menu Utama */}
+          <div className="flex-1 flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
+            <span className="text-[9px] font-black text-yellow-700 uppercase tracking-widest shrink-0">🍽</span>
+            <Select value={selectedGroup} onValueChange={(val) => val && setSelectedGroup(val)}>
+              <SelectTrigger className="h-7 border-0 bg-transparent text-xs font-bold text-yellow-900 p-0 shadow-none focus:ring-0 gap-1">
+                <SelectValue placeholder="Menu Utama..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
+                {menuGroups.map(grp => (
+                  <SelectItem key={grp} value={grp} className="font-semibold text-xs">{grp}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Add-On */}
+          <div className="flex-1 flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">
+            <span className="text-[9px] font-black text-blue-700 uppercase tracking-widest shrink-0">☕</span>
+            <Select value={selectedAddonCategory} onValueChange={(val) => val && setSelectedAddonCategory(val)}>
+              <SelectTrigger className="h-7 border-0 bg-transparent text-xs font-bold text-blue-900 p-0 shadow-none focus:ring-0 gap-1">
+                <SelectValue placeholder="Add-On..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
+                {addonCategories.map(cat => (
+                  <SelectItem key={cat} value={cat} className="font-semibold text-xs">{cat}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Menu Items Checkboxes */}
