@@ -13,9 +13,25 @@ type Toast = {
 
 export default function GlobalOrderToaster() {
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
-    // Subscribe to new orders being inserted into kantin_orders
+    // Check if user is admin (has a valid supabase auth session)
+    supabase.auth.getSession().then(({ data }) => {
+      setIsAdmin(!!data.session)
+    })
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsAdmin(!!session)
+    })
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    // 1. Subscribe to new orders (VISIBLE TO EVERYONE)
     const channel = supabase
       .channel('public:kantin_orders')
       .on(
@@ -35,13 +51,11 @@ export default function GlobalOrderToaster() {
               message: `${nama} telah berhasil memesan ${foodName}.`
             }])
 
-            // Auto remove after 5 seconds
             setTimeout(() => {
               setToasts(prev => prev.filter(t => t.id !== toastId))
             }, 5000)
           }
 
-          // Fetch the exact food name because Realtime only sends the UUID
           if (menuId) {
              supabase.from('kantin_menus').select('nama').eq('id', menuId).single().then(({data}) => {
                 showToast(data?.nama || 'Makanan')
@@ -57,40 +71,45 @@ export default function GlobalOrderToaster() {
       )
       .subscribe()
 
-    // Subscribe to Top Up reminders (kantin_profiles updates)
-    const profileChannel = supabase
-      .channel('public:kantin_profiles')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'kantin_profiles' },
-        (payload) => {
-          const oldProfile = payload.old
-          const newProfile = payload.new
-          
-          // Check if they just requested a topup
-          if (newProfile.is_requesting_topup && !oldProfile.is_requesting_topup) {
-            const toastId = Math.random().toString()
-            setToasts(prev => [...prev, {
-              id: toastId,
-              title: "🔔 Pengingat Top Up!",
-              message: `${newProfile.nama} baru saja menekan tombol Ingatkan Admin karena sudah transfer.`,
-              type: 'topup'
-            }])
+    // 2. Subscribe to Top Up reminders (ONLY VISIBLE TO ADMIN)
+    let profileChannel: any = null;
+    if (isAdmin) {
+      profileChannel = supabase
+        .channel('public:kantin_profiles')
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'kantin_profiles' },
+          (payload) => {
+            const oldProfile = payload.old
+            const newProfile = payload.new
+            
+            const justRequested = newProfile.is_requesting_topup && !oldProfile.is_requesting_topup
+            const justRemindedAgain = newProfile.topup_remind_count > (oldProfile.topup_remind_count || 0)
 
-            // Auto remove after 8 seconds
-            setTimeout(() => {
-              setToasts(prev => prev.filter(t => t.id !== toastId))
-            }, 8000)
+            if (justRequested || justRemindedAgain) {
+              const countStr = newProfile.topup_remind_count > 1 ? ` (Peringatan ke-${newProfile.topup_remind_count})` : ''
+              const toastId = Math.random().toString()
+              setToasts(prev => [...prev, {
+                id: toastId,
+                title: "🔔 Pengingat Top Up!",
+                message: `${newProfile.nama} baru saja menekan tombol Ingatkan Admin karena sudah transfer.${countStr}`,
+                type: 'topup'
+              }])
+
+              setTimeout(() => {
+                setToasts(prev => prev.filter(t => t.id !== toastId))
+              }, 8000)
+            }
           }
-        }
-      )
-      .subscribe()
+        )
+        .subscribe()
+    }
 
     return () => {
       supabase.removeChannel(channel)
-      supabase.removeChannel(profileChannel)
+      if (profileChannel) supabase.removeChannel(profileChannel)
     }
-  }, [])
+  }, [isAdmin])
 
   if (toasts.length === 0) return null
 

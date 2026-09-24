@@ -61,7 +61,11 @@ export default function TopUpPage() {
     try {
       const { error } = await supabase.rpc('request_topup', { p_profile_id: activeProfile.id })
       if (error) throw error
-      setActiveProfile({ ...activeProfile, is_requesting_topup: true })
+      setActiveProfile({ 
+        ...activeProfile, 
+        is_requesting_topup: true,
+        topup_remind_count: (activeProfile.topup_remind_count || 0) + 1
+      })
       alert('Admin telah diingatkan! Silakan tunggu konfirmasi.')
     } catch (e) {
       alert('Gagal mengirim pengingat.')
@@ -136,12 +140,14 @@ export default function TopUpPage() {
             <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg flex flex-col gap-2">
               <p className="text-xs text-blue-800 font-medium">Sudah transfer tapi saldo belum bertambah?</p>
               <Button 
-                variant={activeProfile.is_requesting_topup ? "secondary" : "default"}
-                className={`w-full text-xs font-bold ${activeProfile.is_requesting_topup ? 'bg-blue-100 text-blue-800' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                variant={(activeProfile.topup_remind_count || 0) > 0 ? "secondary" : "default"}
+                className={`w-full text-xs font-bold ${(activeProfile.topup_remind_count || 0) > 0 ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
                 onClick={handleRemindAdmin}
-                disabled={activeProfile.is_requesting_topup || loadingAlert}
+                disabled={(activeProfile.topup_remind_count || 0) >= 25 || loadingAlert}
               >
-                {activeProfile.is_requesting_topup ? '✅ Admin Telah Diingatkan' : (loadingAlert ? 'Mengirim...' : '🔔 Ingatkan Admin')}
+                {(activeProfile.topup_remind_count || 0) > 0 
+                  ? `✅ Admin Telah Diingatkan - Klik untuk ingatkan lagi` 
+                  : (loadingAlert ? 'Mengirim...' : '🔔 Ingatkan Admin')}
               </Button>
             </div>
 

@@ -187,7 +187,7 @@ export default function PdfTopupManager({ profiles }: { profiles: any[] }) {
       if (error) throw error
 
       // If successful, clear their request flag automatically just in case
-      await supabase.from('kantin_profiles').update({ is_requesting_topup: false }).eq('id', item.matchedProfile.id)
+      await supabase.from('kantin_profiles').update({ is_requesting_topup: false, topup_remind_count: 0 }).eq('id', item.matchedProfile.id)
 
       newList[index].status = 'done'
     } catch (err: any) {
@@ -247,7 +247,7 @@ export default function PdfTopupManager({ profiles }: { profiles: any[] }) {
                               p_keterangan: 'Top Up Manual / Auto'
                             })
                             if (error) throw error
-                            await supabase.from('kantin_profiles').update({ is_requesting_topup: false }).eq('id', p.id)
+                            await supabase.from('kantin_profiles').update({ is_requesting_topup: false, topup_remind_count: 0 }).eq('id', p.id)
                             alert(`Berhasil Top Up Rp ${nominal.toLocaleString('id-ID')} ke ${p.nama}`)
                             window.location.reload()
                           } catch (e: any) {
@@ -262,7 +262,7 @@ export default function PdfTopupManager({ profiles }: { profiles: any[] }) {
                     <button 
                       className="text-red-500 hover:text-red-900 px-1 bg-red-200 rounded"
                       onClick={async () => {
-                        await supabase.from('kantin_profiles').update({ is_requesting_topup: false }).eq('id', p.id)
+                        await supabase.from('kantin_profiles').update({ is_requesting_topup: false, topup_remind_count: 0 }).eq('id', p.id)
                         alert(`Pengingat disembunyikan. Refresh halaman.`)
                       }}
                       title="Abaikan Pengingat"

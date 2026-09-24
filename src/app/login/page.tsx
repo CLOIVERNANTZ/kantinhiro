@@ -27,7 +27,7 @@ export default async function LoginPage() {
         
         <div className="text-center mt-8 pb-4">
           <p className="text-xs font-bold text-slate-500">
-            &copy; 2026 System by Tigerman Siringoringo
+            &copy; 2026 System by Cloivernantz
           </p>
         </div>
       </div>
