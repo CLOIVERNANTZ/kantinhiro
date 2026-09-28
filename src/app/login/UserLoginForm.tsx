@@ -47,6 +47,11 @@ export default function UserLoginForm({ profiles }: { profiles: any[] }) {
       setErrorMsg('Nama tidak terdaftar. Silakan daftar baru jika Anda belum punya akun.')
       return
     }
+
+    if (profile.status === 'inactive') {
+      setErrorMsg('Akun ini telah dinonaktifkan oleh Admin. Silakan hubungi Admin.')
+      return
+    }
     
     setLoading(true)
     setErrorMsg('')

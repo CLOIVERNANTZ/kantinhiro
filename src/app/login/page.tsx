@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 export const revalidate = 0
 
 export default async function LoginPage() {
-  const { data: profiles } = await supabase.from('kantin_profiles').select('id, nama').order('nama')
+  const { data: profiles } = await supabase.from('kantin_profiles').select('id, nama, status').order('nama')
   
   return (
     <div 

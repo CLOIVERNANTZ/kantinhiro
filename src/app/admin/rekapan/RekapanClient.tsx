@@ -101,6 +101,16 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
     })
   }, [orders])
 
+  const groupedOrders = useMemo(() => {
+    return sortedOrders.reduce((acc, order) => {
+      let baseCode = order.kantin_menus?.kode_unik || 'Lainnya'
+      if (baseCode.includes('-')) baseCode = baseCode.split('-')[0]
+      if (!acc[baseCode]) acc[baseCode] = []
+      acc[baseCode].push(order)
+      return acc
+    }, {} as Record<string, any[]>)
+  }, [sortedOrders])
+
   const toggleCheck = async (id: string, currentStatus: boolean) => {
     const newStatus = !currentStatus
     const orderStatus = newStatus ? 'selesai' : 'pending'
@@ -192,6 +202,34 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
       if (order.deskripsi_addon) str += ` (${order.deskripsi_addon})`
     }
     return str
+  }
+
+  const handleCopyPerToko = (group: string, items: any[]) => {
+    let text = `*${group}*\n`
+    let count = 0
+    items.forEach(i => {
+      if (i.status === 'dibatalkan') return;
+      
+      const userName = i.kantin_profiles?.nama || 'Unknown'
+      const menuName = i.kantin_menus?.nama || i.kantin_addons?.nama || 'Menu Custom'
+      let desc = i.deskripsi_pesanan ? `${i.deskripsi_pesanan}` : ''
+      if (i.addon_id) {
+        desc += desc ? ` + ` : ''
+        desc += `${i.kantin_addons?.nama} (${i.deskripsi_addon || ''})`
+      }
+      
+      const formattedDesc = desc ? ` (${desc})` : ''
+      text += `- ${userName} pesan ${menuName}${formattedDesc}\n`
+      count++
+    })
+    
+    if (count === 0) {
+      alert(`Tidak ada pesanan valid di kelompok ${group} (semua batal).`)
+      return
+    }
+
+    navigator.clipboard.writeText(text)
+    alert(`Rekapan ${group} disalin!`)
   }
 
   // Manual Order State
@@ -308,8 +346,34 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
             </DialogContent>
           </Dialog>
 
-          <Button onClick={handleCopyWA} variant="outline" className="flex gap-2 font-bold text-slate-700">
-            <Copy className="h-4 w-4" /> Copy for WhatsApp
+          <Dialog>
+            <DialogTrigger className="flex items-center justify-center gap-2 font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 px-4 py-2 rounded-md h-10 text-sm">
+              <Copy className="h-4 w-4" /> per Toko
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[400px]">
+              <DialogHeader>
+                <DialogTitle>Copy Pesanan per Toko</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-2 mt-4 max-h-[60vh] overflow-y-auto pr-2">
+                {Object.keys(groupedOrders).length === 0 ? (
+                  <p className="text-sm text-slate-500 text-center py-4">Belum ada pesanan.</p>
+                ) : (
+                  (Object.entries(groupedOrders) as [string, any[]][]).map(([group, groupOrders]) => (
+                    <Button 
+                      key={group} 
+                      onClick={() => handleCopyPerToko(group, groupOrders)} 
+                      className="w-full justify-start text-left bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100"
+                    >
+                      <Copy className="h-4 w-4 mr-2" /> {group} ({groupOrders.length} Pesanan)
+                    </Button>
+                  ))
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Button onClick={handleCopyWA} variant="outline" className="flex gap-2 font-bold text-slate-700 h-10">
+            <Copy className="h-4 w-4" /> Copy Semua
           </Button>
         </div>
       </div>
@@ -336,15 +400,7 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
                   </TableCell>
                 </TableRow>
               ) : (
-                (Object.entries(
-                  sortedOrders.reduce((acc, order) => {
-                    let baseCode = order.kantin_menus?.kode_unik || 'Lainnya'
-                    if (baseCode.includes('-')) baseCode = baseCode.split('-')[0]
-                    if (!acc[baseCode]) acc[baseCode] = []
-                    acc[baseCode].push(order)
-                    return acc
-                  }, {} as Record<string, typeof sortedOrders>)
-                ) as [string, any[]][]).map(([group, groupOrders]) => (
+                (Object.entries(groupedOrders) as [string, any[]][]).map(([group, groupOrders]) => (
                   <React.Fragment key={group}>
                     {/* Group Header */}
                     <TableRow className="bg-yellow-50 hover:bg-yellow-50">
