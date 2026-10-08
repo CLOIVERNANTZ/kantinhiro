@@ -480,7 +480,7 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
                                   const c = confirm(`Batalkan pesanan ini karena habis/kosong? Saldo ${order.kantin_profiles?.nama} akan dikembalikan.`)
                                   if (!c) return
                                   try {
-                                    const { error } = await supabase.rpc('cancel_user_order', { p_order_id: order.id })
+                                    const { error } = await supabase.rpc('cancel_user_order', { p_order_id: order.id, p_bypass_time: true })
                                     if (error) throw error
                                     setOrders(orders.map(o => o.id === order.id ? { ...o, status: 'dibatalkan' } : o))
                                   } catch (e: any) {
