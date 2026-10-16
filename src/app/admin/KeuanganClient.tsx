@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,38 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
   const [history, setHistory] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState('')
 
+  // Sync users state if initial profiles prop changes
+  useEffect(() => {
+    setUsers(sortedProfiles)
+  }, [sortedProfiles])
+
+  // Realtime subscription agar saldo selalu sinkron live tanpa perlu refresh
+  useEffect(() => {
+    const channel = supabase
+      .channel('public:kantin_profiles_keuangan')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'kantin_profiles' },
+        (payload) => {
+          const updated = payload.new as any
+          if (updated && updated.id) {
+            setUsers((prev) =>
+              prev.map((u) =>
+                u.id === updated.id
+                  ? { ...u, saldo: updated.saldo, status: updated.status, divisi: updated.divisi }
+                  : u
+              )
+            )
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
   const filteredUsers = users.filter(user => 
     user.nama.toLowerCase().includes(searchTerm.toLowerCase()) || 
     (user.divisi && user.divisi.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -55,52 +87,54 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
     return str
   }
 
-  const handleDeposit = async (userId: string, currentSaldo: number) => {
+  const handleDeposit = async (userId: string) => {
     const amount = parseInt(depositAmount)
     if (!amount || amount <= 0) {
       showAlert({ title: "Perhatian", message: "Masukkan jumlah deposit yang valid.", type: "warning" })
       return
     }
 
-    const newSaldo = Number(currentSaldo) + amount
-    
-    // Optimistic UI
-    setUsers(users.map(u => u.id === userId ? { ...u, saldo: newSaldo } : u))
     setDepositAmount('')
 
-    // Update DB
-    await supabase.from('kantin_profiles').update({ saldo: newSaldo }).eq('id', userId)
-    await supabase.from('kantin_transactions').insert([{
-      profile_id: userId,
-      tipe: 'pemasukan',
-      jumlah: amount,
-      keterangan: 'Deposit Saldo'
-    }])
-    showAlert({ title: "Berhasil", message: "Deposit berhasil ditambahkan.", type: "success" })
+    try {
+      const { data: newSaldo, error } = await supabase.rpc('admin_adjust_saldo', {
+        p_profile_id: userId,
+        p_amount: amount,
+        p_keterangan: 'Deposit Saldo'
+      })
+
+      if (error) throw error
+
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, saldo: newSaldo } : u))
+      showAlert({ title: "Berhasil", message: "Deposit berhasil ditambahkan.", type: "success" })
+    } catch (err: any) {
+      showAlert({ title: "Gagal", message: err.message || "Gagal melakukan deposit", type: "error" })
+    }
   }
 
-  const handleAdjustment = async (userId: string, currentSaldo: number) => {
+  const handleAdjustment = async (userId: string) => {
     const amount = parseInt(adjustmentAmount)
     if (!amount || amount <= 0) {
       showAlert({ title: "Perhatian", message: "Masukkan jumlah pengurangan yang valid.", type: "warning" })
       return
     }
 
-    const newSaldo = Number(currentSaldo) - amount
-    
-    // Optimistic UI
-    setUsers(users.map(u => u.id === userId ? { ...u, saldo: newSaldo } : u))
     setAdjustmentAmount('')
 
-    // Update DB
-    await supabase.from('kantin_profiles').update({ saldo: newSaldo }).eq('id', userId)
-    await supabase.from('kantin_transactions').insert([{
-      profile_id: userId,
-      tipe: 'pengeluaran',
-      jumlah: amount,
-      keterangan: 'Koreksi Saldo (Salah Top Up)'
-    }])
-    showAlert({ title: "Berhasil", message: "Koreksi pengurangan saldo berhasil.", type: "success" })
+    try {
+      const { data: newSaldo, error } = await supabase.rpc('admin_adjust_saldo', {
+        p_profile_id: userId,
+        p_amount: -amount,
+        p_keterangan: 'Koreksi Saldo (Salah Top Up)'
+      })
+
+      if (error) throw error
+
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, saldo: newSaldo } : u))
+      showAlert({ title: "Berhasil", message: "Koreksi pengurangan saldo berhasil.", type: "success" })
+    } catch (err: any) {
+      showAlert({ title: "Gagal", message: err.message || "Gagal melakukan koreksi", type: "error" })
+    }
   }
 
   const handleUpdateDivisi = async (userId: string, newDivisi: string) => {
@@ -213,7 +247,7 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
                                 onChange={(e) => setDepositAmount(e.target.value)}
                                 className="text-sm"
                               />
-                              <Button onClick={() => handleDeposit(user.id, user.saldo)} className="bg-yellow-500 hover:bg-yellow-600 font-bold">Top Up</Button>
+                              <Button onClick={() => handleDeposit(user.id)} className="bg-yellow-500 hover:bg-yellow-600 font-bold">Top Up</Button>
                             </div>
                           </DialogContent>
                         </Dialog>
@@ -234,7 +268,7 @@ export default function KeuanganClient({ profiles, recentOrders }: { profiles: a
                                 onChange={(e) => setAdjustmentAmount(e.target.value)}
                                 className="text-sm"
                               />
-                              <Button onClick={() => handleAdjustment(user.id, user.saldo)} className="bg-red-500 hover:bg-red-600 text-white font-bold">Kurangi</Button>
+                              <Button onClick={() => handleAdjustment(user.id)} className="bg-red-500 hover:bg-red-600 text-white font-bold">Kurangi</Button>
                             </div>
                           </DialogContent>
                         </Dialog>
