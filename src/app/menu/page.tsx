@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase'
 import MenuList from './MenuList'
 
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 export const revalidate = 0 // Disable caching for now
 
 export default async function MenuPage() {

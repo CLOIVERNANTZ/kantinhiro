@@ -10,14 +10,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { supabase } from '@/lib/supabase'
 import { useMemo, useEffect } from 'react'
-import { Search, ShoppingBag } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { AlertCircle, Search, ShoppingBag } from 'lucide-react'
 import { useAppDialog } from '@/components/AppDialogProvider'
+import { fetchLiveSaldoAndValidate, getJakartaDateTime, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
 
 export default function MenuList({ menus, addons, profiles, orders }: { menus: any[], addons: any[], profiles: any[], orders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
+  const router = useRouter()
+  const [localAddedOrders, setLocalAddedOrders] = useState<any[]>([])
   const [selectedMenu, setSelectedMenu] = useState<any>(null)
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const orderList = useMemo(() => {
+    const existingIds = new Set(orders.map(o => o.id))
+    return [...localAddedOrders.filter(o => !existingIds.has(o.id)), ...orders]
+  }, [localAddedOrders, orders])
 
   const addonsByCategory = useMemo(() => {
     const grouped: Record<string, any[]> = {}
@@ -48,25 +58,31 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
   // Form State
   const [profileName, setProfileName] = useState('')
   const [profileDivisi, setProfileDivisi] = useState('')
-  const [activeProfile, setActiveProfile] = useState<any>(null)
+  const [activeProfile, setActiveProfile] = useState<KantinProfile | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
 
   useEffect(() => {
     const savedName = localStorage.getItem('kantin_userName')
-    if (!savedName) {
+    const loginTime = localStorage.getItem('kantin_loginTime')
+    if (!savedName || !loginTime || (Date.now() - parseInt(loginTime)) > 3600000) {
+      localStorage.removeItem('kantin_userName')
+      localStorage.removeItem('kantin_loginTime')
+      localStorage.removeItem('kantin_profile_id')
       window.location.href = '/login'
       return
     }
     
     // Auto find active profile by name
     const profile = profiles.find(p => p.nama?.toLowerCase() === savedName.toLowerCase())
-    if (profile) {
+    if (profile && profile.status !== 'inactive') {
       setActiveProfile(profile)
       setProfileName(profile.nama)
       setProfileDivisi(profile.divisi || '')
       setAuthChecking(false)
     } else {
       localStorage.removeItem('kantin_userName')
+      localStorage.removeItem('kantin_loginTime')
+      localStorage.removeItem('kantin_profile_id')
       window.location.href = '/login'
     }
   }, [profiles])
@@ -85,8 +101,29 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
 
   const handlePesan = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
+
     if (!profileName) {
       showAlert({ title: "Perhatian", message: "Nama wajib diisi!", type: "warning" })
+      return
+    }
+
+    const p_id = activeProfile?.id
+    if (!p_id) {
+      showAlert({ title: "Sesi Habis", message: "Sesi Anda tidak valid. Silakan login ulang.", type: "error" })
+      window.location.href = '/login'
+      return
+    }
+
+    const { dateStr, timeStr } = getJakartaDateTime()
+
+    // Cutoff time check
+    if (selectedMenu.jam_tutup && timeStr >= selectedMenu.jam_tutup.substring(0, 5)) {
+      showAlert({
+        title: "Batas Waktu Terlewat",
+        message: `Menu ${selectedMenu.nama} sudah melewati batas waktu pemesanan (${selectedMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
+        type: "error"
+      })
       return
     }
 
@@ -99,15 +136,6 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
       if (!proceed) return
     }
 
-    const p_id = activeProfile?.id
-    if (!p_id) {
-      showAlert({ title: "Sesi Habis", message: "Sesi Anda tidak valid. Silakan login ulang.", type: "error" })
-      window.location.href = '/login'
-      return
-    }
-
-    let profileId = p_id
-
     // 2. Format description based on menu type
     let finalDesc = customDesc
     if (selectedMenu?.tipe_form === 'warteg') {
@@ -116,24 +144,6 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
       if (wartegLauk) parts.push(`Lauk: ${wartegLauk}`)
       if (wartegSayur) parts.push(`Sayur: ${wartegSayur}`)
       finalDesc = parts.join(', ') || 'Kombinasi Warteg'
-    }
-
-    // Cutoff time - soft warning only
-    if (selectedMenu.jam_tutup) {
-      const now = new Date()
-      const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
-      const hours = jakartaTime.getHours().toString().padStart(2, '0')
-      const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
-      const jakartaTimeStr = `${hours}:${minutes}`
-
-      if (jakartaTimeStr >= selectedMenu.jam_tutup.substring(0, 5)) {
-        showAlert({
-          title: "Batas Waktu Terlewat",
-          message: `Menu ${selectedMenu.nama} sudah melewati batas waktu pemesanan (${selectedMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
-          type: "error"
-        })
-        return
-      }
     }
 
     // 3. Addon details
@@ -157,27 +167,50 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
       if (addonDesc) txKet += ` (${addonDesc})`
     }
 
-    // 5. Atomic RPC Call
-    const { error: rpcErr } = await supabase.rpc('process_order', {
-      p_profile_id: profileId,
-      p_menu_id: selectedMenu.id,
-      p_addon_id: finalAddonId,
-      p_deskripsi_pesanan: finalDesc,
-      p_deskripsi_addon: addonDesc,
-      p_harga: selectedMenu.harga,
-      p_harga_addon: addonPrice,
-      p_tanggal: new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" })).toISOString().split('T')[0],
-      p_tx_ket: txKet
-    })
+    setIsSubmitting(true)
+    try {
+      // Cek saldo live dari DB sebelum submit: saldo >= 0 (misal 234) tetap boleh pesan meski hasil batch jadi minus;
+      // jika saldo sudah < 0, wajib top up dulu.
+      const saldoCheck = await fetchLiveSaldoAndValidate(p_id)
+      if (!saldoCheck.ok) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
+        setIsOpen(false)
+        showAlert({
+          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
+          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
+          type: "error"
+        })
+        return
+      }
 
-    if (rpcErr) {
-      showAlert({ title: "Gagal", message: "Gagal membuat pesanan: " + rpcErr.message, type: "error" })
-    } else {
-      showAlert({ title: "Berhasil", message: "Pesanan berhasil dibuat!", type: "success" })
+      const itemPayload: OrderItemPayload = {
+        p_menu_id: selectedMenu.id,
+        p_addon_id: finalAddonId,
+        p_deskripsi_pesanan: finalDesc,
+        p_deskripsi_addon: addonDesc,
+        p_harga: selectedMenu.harga,
+        p_harga_addon: addonPrice,
+        p_tanggal: dateStr,
+        p_tx_ket: txKet
+      }
+
+      const { orderIds, newSaldo } = await submitOrderBatch(p_id, [itemPayload])
+
+      if (newSaldo !== null) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: newSaldo } : prev)
+      }
+
+      if (orderIds.length > 0) {
+        const { data: createdOrders } = await supabase
+          .from('kantin_orders')
+          .select(`*, kantin_profiles(nama), kantin_menus(nama, kode_unik, jam_tutup), kantin_addons(nama)`)
+          .in('id', orderIds)
+        if (createdOrders && createdOrders.length > 0) {
+          setLocalAddedOrders(prev => [...createdOrders, ...prev])
+        }
+      }
+
       setIsOpen(false)
-      // Reset form
-      setProfileName('')
-      setProfileDivisi('')
       setCustomDesc('')
       setWartegNasi('')
       setWartegLauk('')
@@ -185,6 +218,13 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
       setSelectedWartegItemIds([])
       setSelectedAddon('none')
       setAddonDesc('')
+      router.refresh()
+      window.dispatchEvent(new Event('kantin_user_updated'))
+      showAlert({ title: "Berhasil", message: "Pesanan berhasil dibuat!", type: "success" })
+    } catch (err: any) {
+      showAlert({ title: "Gagal", message: "Gagal membuat pesanan: " + (err.message || 'Error'), type: "error" })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -241,58 +281,96 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
 
   // Group all today's orders
   const groupedOrders = useMemo(() => {
-    if (!orders) return []
+    if (!orderList) return []
     const map = new Map<string, any[]>()
-    orders.forEach(o => {
+    orderList.forEach(o => {
       if (o.status === 'dibatalkan') return
       const nama = o.kantin_profiles?.nama || o.nama_user || 'Unknown'
       if (!map.has(nama)) map.set(nama, [])
       map.get(nama)!.push(o)
     })
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-  }, [orders])
+  }, [orderList])
 
   const handleSamain = async (nama: string, userOrders: any[]) => {
+    if (isSubmitting) return
     if (!activeProfile) {
       showAlert({ title: "Sesi Habis", message: "Silakan login terlebih dahulu.", type: "error" })
       return
     }
 
-    const confirm = await showConfirm({
-      title: "Samain Pesanan?",
-      message: `Anda akan langsung memesan makanan yang sama persis dengan yang dipesan oleh ${nama}.\n\nLanjutkan pesanan?`
-    })
+    const { dateStr, timeStr } = getJakartaDateTime()
 
-    if (!confirm) return
-
-    let successCount = 0
-    let lastError = null
     for (const o of userOrders) {
-       const txKetName = o.kantin_menus?.nama || o.kantin_addons?.nama || 'Item'
-       const notes = o.deskripsi_pesanan || o.deskripsi_addon ? ` (${o.deskripsi_pesanan || o.deskripsi_addon})` : ''
-       const { error } = await supabase.rpc('process_order', {
-         p_profile_id: activeProfile.id,
-         p_menu_id: o.menu_id,
-         p_addon_id: o.addon_id,
-         p_deskripsi_pesanan: o.deskripsi_pesanan || '',
-         p_deskripsi_addon: o.deskripsi_addon || '',
-         p_harga: o.harga || 0,
-         p_harga_addon: o.harga_addon || 0,
-         p_tanggal: o.tanggal,
-         p_tx_ket: txKetName + notes
-       })
-       if (!error) {
-         successCount++
-       } else {
-         lastError = error.message
-       }
+      if (o.kantin_menus?.jam_tutup && timeStr >= o.kantin_menus.jam_tutup.substring(0, 5)) {
+        showAlert({
+          title: "Batas Waktu Terlewat",
+          message: `Menu ${o.kantin_menus.nama} sudah melewati batas waktu pemesanan (${o.kantin_menus.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
+          type: "error"
+        })
+        return
+      }
     }
 
-    if (successCount > 0) {
-      showAlert({ title: "Berhasil", message: `${successCount} pesanan berhasil ditambahkan!`, type: "success" })
-      setTimeout(() => window.location.reload(), 2000)
-    } else {
-      showAlert({ title: "Gagal", message: "Gagal menambahkan pesanan: " + (lastError || 'Unknown error'), type: "error" })
+    setIsSubmitting(true)
+    try {
+      // Cek saldo live di DB sebelum konfirmasi: saldo >= 0 (misal 234) tetap boleh pesan batch ini meski hasilnya jadi minus;
+      // jika saldo sudah < 0, wajib top up dulu sebelum bisa memesan lagi.
+      const saldoCheck = await fetchLiveSaldoAndValidate(activeProfile.id)
+      if (!saldoCheck.ok) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
+        showAlert({
+          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
+          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
+          type: "error"
+        })
+        return
+      }
+
+      const confirm = await showConfirm({
+        title: "Samain Pesanan?",
+        message: `Anda akan langsung memesan makanan yang sama persis dengan yang dipesan oleh ${nama}.\n\nLanjutkan pesanan?`
+      })
+      if (!confirm) return
+
+      const items: OrderItemPayload[] = userOrders.map(o => {
+        const txKetName = o.kantin_menus?.nama || o.kantin_addons?.nama || 'Item'
+        const notes = o.deskripsi_pesanan || o.deskripsi_addon ? ` (${o.deskripsi_pesanan || o.deskripsi_addon})` : ''
+        return {
+          p_menu_id: o.menu_id || null,
+          p_addon_id: o.addon_id || null,
+          p_deskripsi_pesanan: o.deskripsi_pesanan || '',
+          p_deskripsi_addon: o.deskripsi_addon || '',
+          p_harga: o.harga || 0,
+          p_harga_addon: o.harga_addon || 0,
+          p_tanggal: o.tanggal || dateStr,
+          p_tx_ket: txKetName + notes
+        }
+      })
+
+      const { orderIds, newSaldo } = await submitOrderBatch(activeProfile.id, items)
+
+      if (newSaldo !== null) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: newSaldo } : prev)
+      }
+
+      if (orderIds.length > 0) {
+        const { data: createdOrders } = await supabase
+          .from('kantin_orders')
+          .select(`*, kantin_profiles(nama), kantin_menus(nama, kode_unik, jam_tutup), kantin_addons(nama)`)
+          .in('id', orderIds)
+        if (createdOrders && createdOrders.length > 0) {
+          setLocalAddedOrders(prev => [...createdOrders, ...prev])
+        }
+      }
+
+      router.refresh()
+      window.dispatchEvent(new Event('kantin_user_updated'))
+      showAlert({ title: "Berhasil", message: `${items.length} pesanan berhasil ditambahkan!`, type: "success" })
+    } catch (err: any) {
+      showAlert({ title: "Gagal", message: "Gagal menambahkan pesanan: " + (err.message || 'Unknown error'), type: "error" })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -302,6 +380,23 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
 
   return (
     <div className="space-y-6">
+      {(activeProfile?.saldo ?? 0) < 0 && (
+        <div className="bg-red-600 text-white p-3 rounded-lg shadow-md border-2 border-red-700 animate-pulse">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-black text-xs uppercase tracking-wider">PERINGATAN TUNGGAKAN!</h3>
+              <p className="text-xs mt-0.5 font-medium">
+                Saldo Anda minus <strong>Rp {Math.abs(activeProfile?.saldo ?? 0).toLocaleString('id-ID')}</strong>. Harap top up terlebih dahulu sebelum memesan kembali!
+              </p>
+              <a href="/topup" className="inline-block mt-1.5 bg-white text-red-700 px-2.5 py-0.5 text-[11px] font-bold rounded hover:bg-red-50">
+                Top-Up ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {groupedOrders.length > 0 && (
         <div className="bg-white rounded-xl px-3 py-3 md:px-5 md:py-4 shadow-sm border border-slate-200 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>
@@ -317,6 +412,7 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
                    <Button 
                      variant="outline" 
                      size="sm" 
+                     disabled={isSubmitting}
                      className="h-4 text-[8px] px-1.5 py-0 border-yellow-300 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-full shrink-0"
                      onClick={() => handleSamain(nama, userOrders)}
                    >
@@ -544,8 +640,10 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
                       <span className="text-lg font-black text-yellow-600">Rp {estimasiHarga.toLocaleString('id-ID')}</span>
                     </div>
                     <div className="flex gap-2">
-                      <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>Batal</Button>
-                      <Button type="submit" className="bg-yellow-500 hover:bg-yellow-600 text-white">Kirim Pesanan</Button>
+                      <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isSubmitting}>Batal</Button>
+                      <Button type="submit" disabled={isSubmitting} className="bg-yellow-500 hover:bg-yellow-600 text-white">
+                        {isSubmitting ? 'Memproses...' : 'Kirim Pesanan'}
+                      </Button>
                     </div>
                   </div>
                 </form>

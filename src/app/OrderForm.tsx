@@ -16,6 +16,7 @@ import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { id } from 'date-fns/locale'
 import { useAppDialog } from '@/components/AppDialogProvider'
+import { fetchLiveSaldoAndValidate, getJakartaDateTime, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
 
 export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
@@ -23,7 +24,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   const [orders, setOrders] = useState(initialOrders)
   
   // Auth State
-  const [activeProfile, setActiveProfile] = useState<any>(null)
+  const [activeProfile, setActiveProfile] = useState<KantinProfile | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
 
   // Pin Reset State
@@ -68,7 +69,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastMeal, setLastMeal] = useState<{ date: string, items: any[] } | null>(null)
-  const todayStr = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" })).toISOString().split('T')[0]
+  const todayStr = getJakartaDateTime().dateStr
   
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyTx, setHistoryTx] = useState<any[]>([])
@@ -175,7 +176,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
   const handleOrder = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+    if (isSubmitting) return
+
     if (checkedItems.length === 0) {
       showAlert({ title: "Perhatian", message: "Pilih minimal satu menu atau add-on!", type: "warning" })
       return
@@ -188,12 +190,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       return
     }
 
-    // CEK JAM TUTUP SEMUA MENU YANG DIPILIH
-    const now = new Date()
-    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
-    const hours = jakartaTime.getHours().toString().padStart(2, '0')
-    const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
-    const jakartaTimeStr = `${hours}:${minutes}`
+    const { dateStr, timeStr: jakartaTimeStr } = getJakartaDateTime()
 
     for (const itemId of checkedItems) {
       const isMenu = menus.find(x => x.id === itemId)
@@ -207,21 +204,24 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
     }
 
-    // BLOCK JIKA SALDO SUDAH MINUS
-    if (activeProfile.saldo < 0) {
-      showAlert({
-        title: "Pemesanan Ditolak",
-        message: `Saldo Anda minus (Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}).\nHarap selesaikan pembayaran sebelumnya untuk memesan kembali.`,
-        type: "error"
-      })
-      return
-    }
-
     setIsSubmitting(true)
 
     try {
-      // --- PRE-BUILD all payloads first to fail fast before touching DB ---
-      const payloads: any[] = []
+      // Cek saldo live di DB: saldo >= 0 tetap boleh pesan batch meski hasilnya jadi minus;
+      // jika saldo sudah < 0, wajib top up dulu sebelum bisa memesan lagi.
+      const saldoCheck = await fetchLiveSaldoAndValidate(p_id)
+      if (!saldoCheck.ok) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
+        showAlert({
+          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
+          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
+          type: "error"
+        })
+        return
+      }
+
+      // --- PRE-BUILD all payloads first ---
+      const payloads: OrderItemPayload[] = []
       for (const itemId of checkedItems) {
         const isMenu = menus.find(x => x.id === itemId)
         const isAddon = addons.find(x => x.id === itemId)
@@ -242,14 +242,13 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
         if (note) txKet += ` (${note})`
         payloads.push({
-          p_profile_id: p_id,
           p_menu_id: m_id,
           p_addon_id: a_id,
           p_deskripsi_pesanan: isMenu ? note : '',
           p_deskripsi_addon: isAddon ? note : '',
           p_harga: isMenu ? price : 0,
           p_harga_addon: isAddon ? price : 0,
-          p_tanggal: todayStr,
+          p_tanggal: dateStr,
           p_tx_ket: txKet
         })
       }
@@ -259,35 +258,24 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         return
       }
 
-      // --- EXECUTE all RPCs; if ANY fails, rollback all already-created orders ---
-      const createdOrderIds: string[] = []
-      const newOrders: any[] = []
+      const { orderIds, newSaldo } = await submitOrderBatch(p_id, payloads)
 
-      for (const payload of payloads) {
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('process_order', payload)
-
-        if (rpcErr) {
-          // ROLLBACK: cancel all orders that already succeeded
-          for (const id of createdOrderIds) {
-            await supabase.rpc('cancel_user_order', { p_order_id: id })
-          }
-          throw rpcErr
-        }
-
-        createdOrderIds.push(rpcData.order_id)
-
-        const { data: newOrder, error: fetchErr } = await supabase
+      let newOrders: any[] = []
+      if (orderIds.length > 0) {
+        const { data: fetchedOrders, error: fetchErr } = await supabase
           .from('kantin_orders')
           .select(`*, kantin_profiles(nama, saldo), kantin_menus(nama, kode_unik), kantin_addons(nama)`)
-          .eq('id', rpcData.order_id)
-          .single()
+          .in('id', orderIds)
 
-        if (!fetchErr && newOrder) {
-          newOrders.push(newOrder)
+        if (!fetchErr && fetchedOrders) {
+          newOrders = fetchedOrders
         }
       }
 
       // All succeeded
+      if (newSaldo !== null) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: newSaldo } : prev)
+      }
       setOrders(prev => [...newOrders, ...prev])
       setCheckedItems([])
       setItemNotes({})
@@ -303,7 +291,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   }
 
   const handleReorder = async () => {
-    if (!lastMeal || lastMeal.items.length === 0) return
+    if (isSubmitting || !lastMeal || lastMeal.items.length === 0) return
     
     // Format the items list for the prompt
     const itemNames = lastMeal.items.map(item => {
@@ -323,11 +311,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     if (!p_id) return
 
     // CEK JAM TUTUP SEMUA MENU YANG AKAN DI-REORDER
-    const now = new Date()
-    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
-    const hours = jakartaTime.getHours().toString().padStart(2, '0')
-    const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
-    const jakartaTimeStr = `${hours}:${minutes}`
+    const { dateStr, timeStr: jakartaTimeStr } = getJakartaDateTime()
 
     for (const oldOrder of lastMeal.items) {
       if (oldOrder.kantin_menus?.jam_tutup && jakartaTimeStr >= oldOrder.kantin_menus.jam_tutup.substring(0, 5)) {
@@ -340,20 +324,21 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
     }
 
-    // BLOCK JIKA SALDO SUDAH MINUS
-    if (activeProfile.saldo < 0) {
-      showAlert({
-        title: "Pemesanan Ditolak",
-        message: `Saldo Anda minus (Rp ${Math.abs(activeProfile.saldo).toLocaleString('id-ID')}).\nHarap selesaikan pembayaran sebelumnya untuk memesan kembali.`,
-        type: "error"
-      })
-      return
-    }
-
     setIsSubmitting(true)
 
     try {
-      const newOrders: any[] = []
+      const saldoCheck = await fetchLiveSaldoAndValidate(p_id)
+      if (!saldoCheck.ok) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
+        showAlert({
+          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
+          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
+          type: "error"
+        })
+        return
+      }
+
+      const payloads: OrderItemPayload[] = []
       for (const oldOrder of lastMeal.items) {
         // Quick check if menu is active
         if (oldOrder.kantin_menus?.is_active === false) {
@@ -375,31 +360,40 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         
         if (note) txKet += ` (${note})`
 
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('process_order', {
-          p_profile_id: p_id,
+        payloads.push({
           p_menu_id: m_id,
           p_addon_id: a_id,
           p_deskripsi_pesanan: isMenu ? note : '',
           p_deskripsi_addon: isAddon ? note : '',
           p_harga: isMenu ? price : 0,
           p_harga_addon: isAddon ? price : 0,
-          p_tanggal: todayStr,
+          p_tanggal: dateStr,
           p_tx_ket: txKet
         })
+      }
 
-        if (rpcErr) throw rpcErr
+      if (payloads.length === 0) {
+        showAlert({ title: "Perhatian", message: "Tidak ada item valid untuk dipesan ulang.", type: "warning" })
+        return
+      }
 
-        const { data: newOrder, error: fetchErr } = await supabase
+      const { orderIds, newSaldo } = await submitOrderBatch(p_id, payloads)
+
+      let newOrders: any[] = []
+      if (orderIds.length > 0) {
+        const { data: fetchedOrders, error: fetchErr } = await supabase
           .from('kantin_orders')
           .select(`*, kantin_profiles(nama, saldo), kantin_menus(nama, kode_unik, jam_tutup), kantin_addons(nama)`)
-          .eq('id', rpcData.order_id)
-          .single()
+          .in('id', orderIds)
 
-        if (!fetchErr && newOrder) {
-          newOrders.push(newOrder)
+        if (!fetchErr && fetchedOrders) {
+          newOrders = fetchedOrders
         }
       }
 
+      if (newSaldo !== null) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: newSaldo } : prev)
+      }
       setOrders(prev => [...newOrders, ...prev])
       router.refresh()
       showAlert({ title: "Berhasil", message: "Pemesanan ulang berhasil!", type: "success" })
@@ -470,6 +464,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       return
     }
 
+    if (!activeProfile) return
+
     setPinLoading(true)
     try {
       const { error } = await supabase.rpc('change_user_pin', {
@@ -526,14 +522,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       <div className="lg:col-span-7 xl:col-span-8 space-y-3">
         
         {/* PERSISTENT DEBT WARNING BANNER */}
-        {activeProfile?.saldo < 0 && (
+        {(activeProfile?.saldo ?? 0) < 0 && (
           <div className="bg-red-600 text-white p-2.5 md:p-3 rounded-lg shadow-md border-2 border-red-700 animate-pulse">
             <div className="flex items-start gap-2">
               <AlertCircle className="h-4 w-4 md:h-5 md:w-5 shrink-0 mt-0.5" />
               <div>
                 <h3 className="font-black text-xs uppercase tracking-wider">PERINGATAN TUNGGAKAN!</h3>
                 <p className="text-[11px] md:text-xs mt-0.5 font-medium">
-                  Hutang <strong>Rp {Math.abs(activeProfile.saldo).toLocaleString('id-ID')}</strong>. Pesanan mungkin tidak diproses sampai lunasi!
+                  Hutang <strong>Rp {Math.abs(activeProfile?.saldo ?? 0).toLocaleString('id-ID')}</strong>. Pesanan mungkin tidak diproses sampai lunasi!
                 </p>
                 <a href="/topup" className="inline-block mt-1.5 bg-white text-red-700 px-2.5 py-0.5 text-[11px] font-bold rounded hover:bg-red-50">
                   Top-Up ↗
@@ -630,8 +626,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
             <div className="bg-slate-50 px-2.5 py-1.5 rounded-lg flex items-center justify-between border border-slate-100">
               <div>
                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Saldo</span>
-                {activeProfile?.saldo < 0 ? (
-                  <span className="text-xs font-black text-red-600">-Rp {Math.abs(activeProfile?.saldo).toLocaleString('id-ID')}</span>
+                {(activeProfile?.saldo ?? 0) < 0 ? (
+                  <span className="text-xs font-black text-red-600">-Rp {Math.abs(activeProfile?.saldo ?? 0).toLocaleString('id-ID')}</span>
                 ) : (
                   <span className="text-xs font-black text-green-600">Rp {(activeProfile?.saldo || 0).toLocaleString('id-ID')}</span>
                 )}
