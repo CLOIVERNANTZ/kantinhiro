@@ -1,14 +1,13 @@
 import { supabase } from '@/lib/supabase'
 import MenuList from './MenuList'
+import { getJakartaDateTime } from '@/lib/orderClient'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
 export const revalidate = 0 // Disable caching for now
 
 export default async function MenuPage() {
-  const now = new Date()
-  const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
-  const todayStr = jakartaTime.toISOString().split('T')[0]
+  const { dateStr: todayStr } = getJakartaDateTime()
 
   // Fetch all data in parallel!
   const [

@@ -65,10 +65,16 @@ const AdminNoteCell = ({ initialValue, onSave, isChecked }: { initialValue: stri
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { getJakartaDateTime } from '@/lib/orderClient'
 
-export default function RekapanClient({ initialOrders, profiles, menus, addons }: { initialOrders: any[], profiles?: any[], menus?: any[], addons?: any[] }) {
+const getTokoName = (order: { kantin_menus?: { kode_unik?: string | null } | null }) => {
+  const code = order.kantin_menus?.kode_unik || 'Lainnya'
+  return code.includes('-') ? code.split('-')[0] : code
+}
+
+export default function RekapanClient({ initialOrders, initialDate, profiles, menus, addons }: { initialOrders: any[], initialDate?: string, profiles?: any[], menus?: any[], addons?: any[] }) {
   const [orders, setOrders] = useState(initialOrders)
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(() => initialDate || getJakartaDateTime().dateStr)
 
   const handleDateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDate = e.target.value
@@ -89,27 +95,38 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
     }
   }
 
-  // Sort and group logic
-  const sortedOrders = useMemo(() => {
-    return [...orders].sort((a, b) => {
-      if (a.is_recap_checked === b.is_recap_checked) {
-        const codeA = a.kantin_menus?.kode_unik || 'ZZZ'
-        const codeB = b.kantin_menus?.kode_unik || 'ZZZ'
-        return codeA.localeCompare(codeB)
-      }
-      return a.is_recap_checked ? 1 : -1
-    })
-  }, [orders])
+  // Kelompokkan per Toko (A-Z) dan urutkan pemesan per Nama (A-Z) untuk mempermudah pembelian
+  const groupedOrders = useMemo<[string, any[]][]>(() => {
+    const groups: Record<string, any[]> = {}
+    for (const order of orders) {
+      const toko = getTokoName(order)
+      if (!groups[toko]) groups[toko] = []
+      groups[toko].push(order)
+    }
 
-  const groupedOrders = useMemo(() => {
-    return sortedOrders.reduce((acc, order) => {
-      let baseCode = order.kantin_menus?.kode_unik || 'Lainnya'
-      if (baseCode.includes('-')) baseCode = baseCode.split('-')[0]
-      if (!acc[baseCode]) acc[baseCode] = []
-      acc[baseCode].push(order)
-      return acc
-    }, {} as Record<string, any[]>)
-  }, [sortedOrders])
+    return Object.entries(groups)
+      .sort(([tokoA], [tokoB]) => {
+        if (tokoA === 'Lainnya' && tokoB !== 'Lainnya') return 1
+        if (tokoB === 'Lainnya' && tokoA !== 'Lainnya') return -1
+        return tokoA.localeCompare(tokoB, 'id', { sensitivity: 'base' })
+      })
+      .map(([toko, items]) => {
+        const sortedItems = [...items].sort((a, b) => {
+          const nameA = (a.kantin_profiles?.nama || 'Unknown').trim()
+          const nameB = (b.kantin_profiles?.nama || 'Unknown').trim()
+          const nameCmp = nameA.localeCompare(nameB, 'id', { sensitivity: 'base' })
+          if (nameCmp !== 0) return nameCmp
+
+          const itemA = a.kantin_menus?.nama || a.kantin_addons?.nama || ''
+          const itemB = b.kantin_menus?.nama || b.kantin_addons?.nama || ''
+          const itemCmp = itemA.localeCompare(itemB, 'id', { sensitivity: 'base' })
+          if (itemCmp !== 0) return itemCmp
+
+          return (a.created_at || '').localeCompare(b.created_at || '')
+        })
+        return [toko, sortedItems]
+      })
+  }, [orders])
 
   const toggleCheck = async (id: string, currentStatus: boolean) => {
     const newStatus = !currentStatus
@@ -159,19 +176,14 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
 
   const handleCopyWA = () => {
     let text = "*REKAPAN PESANAN HARI INI*\n\n"
-    
-    const grouped: Record<string, any[]> = {}
-    orders.forEach(o => {
-      let code = o.kantin_menus?.kode_unik || 'Lainnya'
-      if (code.includes('-')) code = code.split('-')[0]
-      if (!grouped[code]) grouped[code] = []
-      grouped[code].push(o)
-    })
 
-    for (const [code, items] of Object.entries(grouped)) {
+    for (const [code, items] of groupedOrders) {
+      const validItems = items.filter(i => i.status !== 'dibatalkan')
+      if (validItems.length === 0) continue
+
       text += `*[${code}]*\n`
-      items.forEach(i => {
-        const menuName = i.kantin_menus?.nama || 'Menu Custom'
+      validItems.forEach(i => {
+        const menuName = i.kantin_menus?.nama || i.kantin_addons?.nama || 'Menu Custom'
         const basePrice = i.harga || 0
         const addonPrice = i.harga_addon || 0
         const total = basePrice + addonPrice
@@ -355,10 +367,10 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
                 <DialogTitle>Copy Pesanan per Toko</DialogTitle>
               </DialogHeader>
               <div className="space-y-2 mt-4 max-h-[60vh] overflow-y-auto pr-2">
-                {Object.keys(groupedOrders).length === 0 ? (
+                {groupedOrders.length === 0 ? (
                   <p className="text-sm text-slate-500 text-center py-4">Belum ada pesanan.</p>
                 ) : (
-                  (Object.entries(groupedOrders) as [string, any[]][]).map(([group, groupOrders]) => (
+                  groupedOrders.map(([group, groupOrders]) => (
                     <Button 
                       key={group} 
                       onClick={() => handleCopyPerToko(group, groupOrders)} 
@@ -393,14 +405,14 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedOrders.length === 0 ? (
+              {orders.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8 text-slate-500 text-sm">
                     Tidak ada pesanan hari ini.
                   </TableCell>
                 </TableRow>
               ) : (
-                (Object.entries(groupedOrders) as [string, any[]][]).map(([group, groupOrders]) => (
+                groupedOrders.map(([group, groupOrders]) => (
                   <React.Fragment key={group}>
                     {/* Group Header */}
                     <TableRow className="bg-yellow-50 hover:bg-yellow-50">
@@ -503,7 +515,7 @@ export default function RekapanClient({ initialOrders, profiles, menus, addons }
               <TableRow>
                 <TableCell colSpan={3} className="text-right py-3 text-sm">Total Omset Rekapan Hari Ini:</TableCell>
                 <TableCell colSpan={3} className="text-right py-3 text-sm text-yellow-700">
-                  Rp {sortedOrders.filter(o => o.status !== 'dibatalkan').reduce((sum, o) => sum + Number(o.harga) + Number(o.harga_addon || 0), 0).toLocaleString('id-ID')}
+                  Rp {orders.filter(o => o.status !== 'dibatalkan').reduce((sum, o) => sum + Number(o.harga) + Number(o.harga_addon || 0), 0).toLocaleString('id-ID')}
                 </TableCell>
               </TableRow>
             </TableFooter>

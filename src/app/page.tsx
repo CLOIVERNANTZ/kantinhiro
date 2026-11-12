@@ -1,15 +1,13 @@
 import { supabase } from '@/lib/supabase'
 import OrderForm from './OrderForm'
-import { format } from 'date-fns'
-import { id } from 'date-fns/locale'
+import { getJakartaDateTime } from '@/lib/orderClient'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
 export const revalidate = 0
 
 export default async function Home() {
-  const jakartaTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }))
-  const todayStr = jakartaTime.toISOString().split('T')[0]
+  const { dateStr: todayStr } = getJakartaDateTime()
   
   // Fetch all data in parallel for much faster page loads!
   const [
@@ -32,8 +30,6 @@ export default async function Home() {
       .eq('tanggal', todayStr)
       .order('created_at', { ascending: false })
   ])
-
-  const formattedDate = format(new Date(), 'EEEE, dd MMM yyyy', { locale: id })
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">

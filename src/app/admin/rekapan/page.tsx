@@ -2,14 +2,14 @@ import { supabase } from '@/lib/supabase'
 import RekapanClient from './RekapanClient'
 import { format } from 'date-fns'
 import { id } from 'date-fns/locale'
+import { getJakartaDateTime } from '@/lib/orderClient'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
 export const revalidate = 0
 
 export default async function RekapanPage() {
-  const jakartaTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }))
-  const todayStr = jakartaTime.toISOString().split('T')[0]
+  const { dateStr: todayStr } = getJakartaDateTime()
   
   // Fetch today's orders with all relations
   const [
@@ -49,6 +49,7 @@ export default async function RekapanPage() {
       
       <RekapanClient 
         initialOrders={orders || []} 
+        initialDate={todayStr}
         profiles={profiles || []}
         menus={menus || []}
         addons={addons || []}
