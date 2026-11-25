@@ -13,7 +13,7 @@ import { useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertCircle, Search, ShoppingBag } from 'lucide-react'
 import { useAppDialog } from '@/components/AppDialogProvider'
-import { fetchLiveSaldoAndValidate, getJakartaDateTime, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
+import { fetchLiveSaldoAndValidate, getJakartaDateTime, handleFailedSaldoCheck, handleOrderError, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
 
 export default function MenuList({ menus, addons, profiles, orders }: { menus: any[], addons: any[], profiles: any[], orders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
@@ -169,17 +169,12 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
 
     setIsSubmitting(true)
     try {
-      // Cek saldo live dari DB sebelum submit: saldo >= 0 (misal 234) tetap boleh pesan meski hasil batch jadi minus;
-      // jika saldo sudah < 0, wajib top up dulu.
-      const saldoCheck = await fetchLiveSaldoAndValidate(p_id)
+      // Cek saldo live dari DB sebelum submit: saldo akhir dikurang total pesanan tidak boleh minus (< 0)
+      const saldoCheck = await fetchLiveSaldoAndValidate(p_id, estimasiHarga)
       if (!saldoCheck.ok) {
         setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
         setIsOpen(false)
-        showAlert({
-          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
-          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
-          type: "error"
-        })
+        await handleFailedSaldoCheck(saldoCheck, { showAlert, showConfirm }, () => router.push('/topup'))
         return
       }
 
@@ -222,7 +217,8 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
       window.dispatchEvent(new Event('kantin_user_updated'))
       showAlert({ title: "Berhasil", message: "Pesanan berhasil dibuat!", type: "success" })
     } catch (err: any) {
-      showAlert({ title: "Gagal", message: "Gagal membuat pesanan: " + (err.message || 'Error'), type: "error" })
+      setIsOpen(false)
+      await handleOrderError(err, { showAlert, showConfirm }, () => router.push('/topup'), 'Gagal membuat pesanan: ')
     } finally {
       setIsSubmitting(false)
     }
@@ -314,25 +310,6 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
 
     setIsSubmitting(true)
     try {
-      // Cek saldo live di DB sebelum konfirmasi: saldo >= 0 (misal 234) tetap boleh pesan batch ini meski hasilnya jadi minus;
-      // jika saldo sudah < 0, wajib top up dulu sebelum bisa memesan lagi.
-      const saldoCheck = await fetchLiveSaldoAndValidate(activeProfile.id)
-      if (!saldoCheck.ok) {
-        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
-        showAlert({
-          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
-          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
-          type: "error"
-        })
-        return
-      }
-
-      const confirm = await showConfirm({
-        title: "Samain Pesanan?",
-        message: `Anda akan langsung memesan makanan yang sama persis dengan yang dipesan oleh ${nama}.\n\nLanjutkan pesanan?`
-      })
-      if (!confirm) return
-
       const items: OrderItemPayload[] = userOrders.map(o => {
         const txKetName = o.kantin_menus?.nama || o.kantin_addons?.nama || 'Item'
         const notes = o.deskripsi_pesanan || o.deskripsi_addon ? ` (${o.deskripsi_pesanan || o.deskripsi_addon})` : ''
@@ -347,6 +324,21 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
           p_tx_ket: txKetName + notes
         }
       })
+
+      // Cek saldo live di DB sebelum konfirmasi: saldo akhir dikurang total pesanan tidak boleh minus (< 0)
+      const totalSamainPrice = items.reduce((sum, item) => sum + item.p_harga + item.p_harga_addon, 0)
+      const saldoCheck = await fetchLiveSaldoAndValidate(activeProfile.id, totalSamainPrice)
+      if (!saldoCheck.ok) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
+        await handleFailedSaldoCheck(saldoCheck, { showAlert, showConfirm }, () => router.push('/topup'))
+        return
+      }
+
+      const confirm = await showConfirm({
+        title: "Samain Pesanan?",
+        message: `Anda akan langsung memesan makanan yang sama persis dengan yang dipesan oleh ${nama}.\n\nLanjutkan pesanan?`
+      })
+      if (!confirm) return
 
       const { orderIds, newSaldo } = await submitOrderBatch(activeProfile.id, items)
 
@@ -368,7 +360,7 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
       window.dispatchEvent(new Event('kantin_user_updated'))
       showAlert({ title: "Berhasil", message: `${items.length} pesanan berhasil ditambahkan!`, type: "success" })
     } catch (err: any) {
-      showAlert({ title: "Gagal", message: "Gagal menambahkan pesanan: " + (err.message || 'Unknown error'), type: "error" })
+      await handleOrderError(err, { showAlert, showConfirm }, () => router.push('/topup'), 'Gagal menambahkan pesanan: ')
     } finally {
       setIsSubmitting(false)
     }

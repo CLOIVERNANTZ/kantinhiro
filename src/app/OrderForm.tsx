@@ -16,7 +16,7 @@ import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { id } from 'date-fns/locale'
 import { useAppDialog } from '@/components/AppDialogProvider'
-import { fetchLiveSaldoAndValidate, getJakartaDateTime, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
+import { fetchLiveSaldoAndValidate, getJakartaDateTime, handleFailedSaldoCheck, handleOrderError, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
 
 export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
@@ -207,19 +207,6 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     setIsSubmitting(true)
 
     try {
-      // Cek saldo live di DB: saldo >= 0 tetap boleh pesan batch meski hasilnya jadi minus;
-      // jika saldo sudah < 0, wajib top up dulu sebelum bisa memesan lagi.
-      const saldoCheck = await fetchLiveSaldoAndValidate(p_id)
-      if (!saldoCheck.ok) {
-        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
-        showAlert({
-          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
-          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
-          type: "error"
-        })
-        return
-      }
-
       // --- PRE-BUILD all payloads first ---
       const payloads: OrderItemPayload[] = []
       for (const itemId of checkedItems) {
@@ -258,6 +245,15 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         return
       }
 
+      // Cek saldo live di DB: saldo akhir dikurang total pesanan tidak boleh minus (< 0)
+      const totalOrderPrice = payloads.reduce((sum, item) => sum + item.p_harga + item.p_harga_addon, 0)
+      const saldoCheck = await fetchLiveSaldoAndValidate(p_id, totalOrderPrice)
+      if (!saldoCheck.ok) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
+        await handleFailedSaldoCheck(saldoCheck, { showAlert, showConfirm }, () => router.push('/topup'))
+        return
+      }
+
       const { orderIds, newSaldo } = await submitOrderBatch(p_id, payloads)
 
       let newOrders: any[] = []
@@ -284,7 +280,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       window.dispatchEvent(new Event('kantin_user_updated'))
 
     } catch (e: any) {
-      showAlert({ title: "Gagal", message: "Gagal memproses pesanan: " + e.message, type: "error" })
+      await handleOrderError(e, { showAlert, showConfirm }, () => router.push('/topup'), 'Gagal memproses pesanan: ')
     } finally {
       setIsSubmitting(false)
     }
@@ -327,17 +323,6 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     setIsSubmitting(true)
 
     try {
-      const saldoCheck = await fetchLiveSaldoAndValidate(p_id)
-      if (!saldoCheck.ok) {
-        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
-        showAlert({
-          title: saldoCheck.errorTitle || "Pemesanan Ditolak",
-          message: saldoCheck.errorMessage || "Tidak dapat memproses pesanan.",
-          type: "error"
-        })
-        return
-      }
-
       const payloads: OrderItemPayload[] = []
       for (const oldOrder of lastMeal.items) {
         // Quick check if menu is active
@@ -355,7 +340,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         const note = oldOrder.deskripsi_pesanan || oldOrder.deskripsi_addon || ''
         const m_id = oldOrder.menu_id
         const a_id = oldOrder.addon_id
-        const price = isMenu ? oldOrder.kantin_menus?.harga : (isAddon ? oldOrder.kantin_addons?.harga : 0)
+        const price = (isMenu ? oldOrder.kantin_menus?.harga : (isAddon ? oldOrder.kantin_addons?.harga : 0)) || 0
         let txKet = isMenu ? oldOrder.kantin_menus?.nama : (isAddon ? oldOrder.kantin_addons?.nama : '')
         
         if (note) txKet += ` (${note})`
@@ -374,6 +359,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
       if (payloads.length === 0) {
         showAlert({ title: "Perhatian", message: "Tidak ada item valid untuk dipesan ulang.", type: "warning" })
+        return
+      }
+
+      const totalOrderPrice = payloads.reduce((sum, item) => sum + item.p_harga + item.p_harga_addon, 0)
+      const saldoCheck = await fetchLiveSaldoAndValidate(p_id, totalOrderPrice)
+      if (!saldoCheck.ok) {
+        setActiveProfile((prev) => prev ? { ...prev, saldo: saldoCheck.saldo } : prev)
+        await handleFailedSaldoCheck(saldoCheck, { showAlert, showConfirm }, () => router.push('/topup'))
         return
       }
 
@@ -400,7 +393,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       window.dispatchEvent(new Event('kantin_user_updated'))
       
     } catch (e: any) {
-      showAlert({ title: "Gagal", message: "Gagal memproses pesanan: " + e.message, type: "error" })
+      await handleOrderError(e, { showAlert, showConfirm }, () => router.push('/topup'), 'Gagal memproses pesanan: ')
     } finally {
       setIsSubmitting(false)
     }

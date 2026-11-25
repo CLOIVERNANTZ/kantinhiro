@@ -4,8 +4,22 @@ import React, { createContext, useContext, useState, ReactNode } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
-type AlertOptions = { title: string; message: string; type?: 'info' | 'error' | 'success' | 'warning' }
-type ConfirmOptions = { title: string; message: string; confirmText?: string; cancelText?: string; variant?: 'default' | 'destructive' }
+type AlertOptions = {
+  title: string
+  message: string
+  type?: 'info' | 'error' | 'success' | 'warning'
+  imageUrl?: string
+  imageAlt?: string
+}
+type ConfirmOptions = {
+  title: string
+  message: string
+  confirmText?: string
+  cancelText?: string
+  variant?: 'default' | 'destructive'
+  imageUrl?: string
+  imageAlt?: string
+}
 
 type AppDialogContextType = {
   showAlert: (options: AlertOptions) => void
@@ -58,11 +72,20 @@ export function AppDialogProvider({ children }: { children: ReactNode }) {
       <Dialog open={alertOpen} onOpenChange={setAlertOpen}>
         <DialogContent className="sm:max-w-md w-[90vw] mx-auto rounded-xl">
           <DialogHeader>
-            <DialogTitle className={alertConfig?.type === 'error' ? 'text-red-600' : alertConfig?.type === 'warning' ? 'text-yellow-600' : alertConfig?.type === 'success' ? 'text-green-600' : 'text-blue-600'}>
+            <DialogTitle className={`${alertConfig?.imageUrl ? 'text-center ' : ''}${alertConfig?.type === 'error' ? 'text-red-600' : alertConfig?.type === 'warning' ? 'text-yellow-600' : alertConfig?.type === 'success' ? 'text-green-600' : 'text-blue-600'}`}>
               {alertConfig?.title}
             </DialogTitle>
           </DialogHeader>
-          <div className="py-4 text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
+          {alertConfig?.imageUrl && (
+            <div className="flex justify-center pt-1">
+              <img
+                src={alertConfig.imageUrl}
+                alt={alertConfig.imageAlt || 'Ilustrasi'}
+                className="max-h-56 w-auto rounded-xl object-cover shadow-md border-2 border-yellow-200"
+              />
+            </div>
+          )}
+          <div className={`py-3 text-sm text-slate-600 whitespace-pre-wrap leading-relaxed ${alertConfig?.imageUrl ? 'text-center' : ''}`}>
             {alertConfig?.message}
           </div>
           <DialogFooter>
@@ -75,12 +98,23 @@ export function AppDialogProvider({ children }: { children: ReactNode }) {
       <Dialog open={confirmOpen} onOpenChange={(open) => { if (!open) handleConfirmClose(false) }}>
         <DialogContent className="sm:max-w-md w-[90vw] mx-auto rounded-xl">
           <DialogHeader>
-            <DialogTitle>{confirmConfig?.title}</DialogTitle>
+            <DialogTitle className={confirmConfig?.imageUrl ? 'text-center text-yellow-700' : ''}>
+              {confirmConfig?.title}
+            </DialogTitle>
           </DialogHeader>
-          <div className="py-4 text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
+          {confirmConfig?.imageUrl && (
+            <div className="flex justify-center pt-1">
+              <img
+                src={confirmConfig.imageUrl}
+                alt={confirmConfig.imageAlt || 'Ilustrasi'}
+                className="max-h-56 w-auto rounded-xl object-cover shadow-md border-2 border-yellow-200"
+              />
+            </div>
+          )}
+          <div className={`py-3 text-sm text-slate-600 whitespace-pre-wrap leading-relaxed ${confirmConfig?.imageUrl ? 'text-center' : ''}`}>
             {confirmConfig?.message}
           </div>
-          <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end mt-4">
+          <DialogFooter className={`flex flex-col-reverse sm:flex-row gap-2 mt-2 ${confirmConfig?.imageUrl ? 'sm:justify-center' : 'sm:justify-end'}`}>
             <Button variant="outline" onClick={() => handleConfirmClose(false)} className="w-full sm:w-auto font-bold border-slate-200">
               {confirmConfig?.cancelText || 'Batal'}
             </Button>

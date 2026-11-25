@@ -22,6 +22,8 @@ export interface OrderItemPayload {
 export interface LiveSaldoCheckResult {
   ok: boolean
   saldo: number
+  isInsufficient?: boolean
+  requiredAmount?: number
   errorTitle?: string
   errorMessage?: string
 }
@@ -50,11 +52,30 @@ export function getJakartaDateTime(): { dateStr: string; timeStr: string } {
   }
 }
 
+export const INSUFFICIENT_SALDO_TITLE = 'Hiks... Dompetnya Lagi Meong-Meong Kelaparan 🥺🐾'
+export const INSUFFICIENT_SALDO_IMAGE = '/saldo-tipis.jpg'
+
+export function buildInsufficientSaldoMessage(saldo: number, requiredAmount: number): string {
+  return (
+    `Saldo kamu tinggal Rp ${saldo.toLocaleString('id-ID')}, padahal total jajanannya Rp ${requiredAmount.toLocaleString('id-ID')}... 😿\n\n` +
+    `Liat tuh tatapan penuh harapannya—perut udah keroncongan tapi dompetnya masih nangis di pojokan 😭\n` +
+    `Yuk top up sebentar biar si meong bisa senyum dan kamu bisa makan enak! ✨🍜`
+  )
+}
+
+export interface DialogHandlers {
+  showAlert: (opts: { title: string; message: string; type?: 'info' | 'error' | 'success' | 'warning'; imageUrl?: string; imageAlt?: string }) => void
+  showConfirm: (opts: { title: string; message: string; confirmText?: string; cancelText?: string; imageUrl?: string; imageAlt?: string }) => Promise<boolean>
+}
+
 /**
- * Fetches live profile status & balance from DB and blocks users whose balance is already negative (< 0).
- * Users with saldo >= 0 (e.g., 234) are allowed to place one batch even if the batch takes them negative.
+ * Fetches live profile status & balance from DB and blocks orders whenever
+ * resulting balance after the order would be negative (`saldo - requiredAmount < 0`).
  */
-export async function fetchLiveSaldoAndValidate(profileId: string): Promise<LiveSaldoCheckResult> {
+export async function fetchLiveSaldoAndValidate(
+  profileId: string,
+  requiredAmount = 0
+): Promise<LiveSaldoCheckResult> {
   const { data: liveProfile, error } = await supabase
     .from('kantin_profiles')
     .select('id, saldo, status')
@@ -79,16 +100,101 @@ export async function fetchLiveSaldoAndValidate(profileId: string): Promise<Live
     }
   }
 
-  if (liveProfile.saldo < 0) {
+  if (liveProfile.saldo - requiredAmount < 0) {
     return {
       ok: false,
       saldo: liveProfile.saldo,
-      errorTitle: 'Pemesanan Ditolak',
-      errorMessage: `Saldo Anda minus (Rp ${Math.abs(liveProfile.saldo).toLocaleString('id-ID')}).\nHarap top up terlebih dahulu sebelum memesan kembali.`,
+      isInsufficient: true,
+      requiredAmount,
+      errorTitle: INSUFFICIENT_SALDO_TITLE,
+      errorMessage: buildInsufficientSaldoMessage(liveProfile.saldo, requiredAmount),
     }
   }
 
   return { ok: true, saldo: liveProfile.saldo }
+}
+
+/**
+ * Shows a cute dramatic Top Up prompt with the pleading cat image when balance is insufficient,
+ * or a standard error alert otherwise.
+ */
+export async function handleFailedSaldoCheck(
+  saldoCheck: LiveSaldoCheckResult,
+  dialogs: DialogHandlers,
+  onGoTopUp: () => void
+): Promise<void> {
+  if (saldoCheck.isInsufficient) {
+    const goToTopUp = await dialogs.showConfirm({
+      title: saldoCheck.errorTitle || INSUFFICIENT_SALDO_TITLE,
+      message: saldoCheck.errorMessage || 'Yuk top up dulu sebentar yukk!',
+      confirmText: 'Top Up Sekarang Yuk! 💖',
+      cancelText: 'Nanti Dulu Deh 😿',
+      imageUrl: INSUFFICIENT_SALDO_IMAGE,
+      imageAlt: 'Kucing imut memohon top up saldo',
+    })
+    if (goToTopUp) {
+      onGoTopUp()
+    }
+    return
+  }
+
+  dialogs.showAlert({
+    title: saldoCheck.errorTitle || 'Pemesanan Ditolak',
+    message: saldoCheck.errorMessage || 'Tidak dapat memproses pesanan.',
+    type: 'error',
+  })
+}
+
+/**
+ * Handles errors thrown during order submission; converts DB-level insufficient balance
+ * exceptions into the same cute Top Up dialog instead of a generic error alert.
+ */
+export async function handleOrderError(
+  err: unknown,
+  dialogs: DialogHandlers,
+  onGoTopUp: () => void,
+  fallbackPrefix = 'Gagal memproses pesanan: '
+): Promise<void> {
+  const errMessage = err instanceof Error ? err.message : String((err as { message?: string })?.message || err || 'Unknown error')
+  const match = errMessage.match(/Saldo kamu sekarang Rp\s*(-?\d+),\s*sedangkan total pesanannya Rp\s*(-?\d+)/i)
+  if (match) {
+    const saldo = parseInt(match[1], 10)
+    const requiredAmount = parseInt(match[2], 10)
+    await handleFailedSaldoCheck(
+      {
+        ok: false,
+        saldo,
+        isInsufficient: true,
+        requiredAmount,
+        errorTitle: INSUFFICIENT_SALDO_TITLE,
+        errorMessage: buildInsufficientSaldoMessage(saldo, requiredAmount),
+      },
+      dialogs,
+      onGoTopUp
+    )
+    return
+  }
+
+  if (/saldo.*(tidak mencukupi|minus)/i.test(errMessage)) {
+    await handleFailedSaldoCheck(
+      {
+        ok: false,
+        saldo: 0,
+        isInsufficient: true,
+        errorTitle: INSUFFICIENT_SALDO_TITLE,
+        errorMessage: `${errMessage}\n\nDompetnya masih nangis di pojokan 😭 Yuk top up bentar biar bisa makan enak! ✨🍜`,
+      },
+      dialogs,
+      onGoTopUp
+    )
+    return
+  }
+
+  dialogs.showAlert({
+    title: 'Gagal',
+    message: `${fallbackPrefix}${errMessage}`,
+    type: 'error',
+  })
 }
 
 /**
