@@ -52,14 +52,13 @@ export function getJakartaDateTime(): { dateStr: string; timeStr: string } {
   }
 }
 
-export const INSUFFICIENT_SALDO_TITLE = 'Hiks... Dompetnya Lagi Meong-Meong Kelaparan 🥺🐾'
+export const INSUFFICIENT_SALDO_TITLE = 'Saldonya belum cukup nih, Kak 🥺🐾'
 export const INSUFFICIENT_SALDO_IMAGE = '/saldo-tipis.jpg'
 
 export function buildInsufficientSaldoMessage(saldo: number, requiredAmount: number): string {
   return (
-    `Saldo kamu tinggal Rp ${saldo.toLocaleString('id-ID')}, padahal total jajanannya Rp ${requiredAmount.toLocaleString('id-ID')}... 😿\n\n` +
-    `Liat tuh tatapan penuh harapannya—perut udah keroncongan tapi dompetnya masih nangis di pojokan 😭\n` +
-    `Yuk top up sebentar biar si meong bisa senyum dan kamu bisa makan enak! ✨🍜`
+    `Saldo kamu sekarang Rp ${saldo.toLocaleString('id-ID')}, sedangkan total pesananmu Rp ${requiredAmount.toLocaleString('id-ID')}.\n\n` +
+    `Jangan biarin si meong nunggu kelamaan ya... yuk isi saldo sebentar biar bisa langsung pesan makan enak! 🍜✨`
   )
 }
 
@@ -126,9 +125,9 @@ export async function handleFailedSaldoCheck(
   if (saldoCheck.isInsufficient) {
     const goToTopUp = await dialogs.showConfirm({
       title: saldoCheck.errorTitle || INSUFFICIENT_SALDO_TITLE,
-      message: saldoCheck.errorMessage || 'Yuk top up dulu sebentar yukk!',
-      confirmText: 'Top Up Sekarang Yuk! 💖',
-      cancelText: 'Nanti Dulu Deh 😿',
+      message: saldoCheck.errorMessage || 'Yuk isi saldo sebentar biar bisa langsung pesan makan enak!',
+      confirmText: 'Top Up Sekarang Yuk',
+      cancelText: 'Nanti Dulu Ya',
       imageUrl: INSUFFICIENT_SALDO_IMAGE,
       imageAlt: 'Kucing imut memohon top up saldo',
     })
@@ -182,7 +181,7 @@ export async function handleOrderError(
         saldo: 0,
         isInsufficient: true,
         errorTitle: INSUFFICIENT_SALDO_TITLE,
-        errorMessage: `${errMessage}\n\nDompetnya masih nangis di pojokan 😭 Yuk top up bentar biar bisa makan enak! ✨🍜`,
+        errorMessage: `${errMessage}\n\nJangan biarin si meong nunggu kelamaan ya... yuk isi saldo sebentar biar bisa langsung pesan makan enak! 🍜✨`,
       },
       dialogs,
       onGoTopUp

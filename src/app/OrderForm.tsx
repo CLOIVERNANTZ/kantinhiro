@@ -11,12 +11,32 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
-import { AlertCircle, Image as ImageIcon, ShoppingBag, Trash2, KeyRound } from 'lucide-react'
+import { AlertCircle, Image as ImageIcon, ShoppingBag, Trash2, KeyRound, Sparkles, RotateCcw, Clock } from 'lucide-react'
 import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { id } from 'date-fns/locale'
 import { useAppDialog } from '@/components/AppDialogProvider'
 import { fetchLiveSaldoAndValidate, getJakartaDateTime, handleFailedSaldoCheck, handleOrderError, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
+import { getJakartaWelcomeGreeting, DailyGreetingData } from '@/lib/greetings'
+
+interface ComboOrderEntry {
+  menu_id: string | null
+  addon_id: string | null
+  note: string
+  addonNote: string
+  nama: string
+  snapshotHarga: number
+}
+
+interface TopOrderCombo {
+  signature: string
+  count: number
+  lastDate: string
+  items: ComboOrderEntry[]
+  totalLivePrice: number
+  hasSoldOut: boolean
+  hasClosed: boolean
+}
 
 export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
@@ -69,44 +89,166 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastMeal, setLastMeal] = useState<{ date: string, items: any[] } | null>(null)
+  const [topCombos, setTopCombos] = useState<TopOrderCombo[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [welcomeData, setWelcomeData] = useState<DailyGreetingData>(() => getJakartaWelcomeGreeting(0))
   const todayStr = getJakartaDateTime().dateStr
   
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyTx, setHistoryTx] = useState<any[]>([])
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setWelcomeData(getJakartaWelcomeGreeting())
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
     if (!activeProfile?.id) return
 
-    const fetchLastMeal = async () => {
-      // 1. Get the most recent order date EXCLUDING today
-      const { data: latest } = await supabase
+    const fetchOrderSuggestions = async () => {
+      const { data: pastOrders } = await supabase
         .from('kantin_orders')
-        .select('tanggal')
+        .select(`
+          id, tanggal, created_at, menu_id, addon_id,
+          deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status,
+          kantin_menus(nama, harga, is_active, is_habis, jam_tutup),
+          kantin_addons(nama, harga, is_habis)
+        `)
         .eq('profile_id', activeProfile.id)
+        .neq('status', 'dibatalkan')
         .lt('tanggal', todayStr)
         .order('tanggal', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      if (!latest || latest.length === 0) return
-      
-      const lastDate = latest[0].tanggal
-      
-      // 2. Fetch all items from that date
-      const { data: mealItems } = await supabase
-        .from('kantin_orders')
-        .select(`*, kantin_menus(nama, harga, is_active), kantin_addons(nama, harga, is_habis)`)
-        .eq('profile_id', activeProfile.id)
-        .eq('tanggal', lastDate)
         .order('created_at', { ascending: true })
-        
-      if (mealItems && mealItems.length > 0) {
-        setLastMeal({ date: lastDate, items: mealItems })
+        .limit(300)
+
+      if (!pastOrders || pastOrders.length === 0) return
+
+      // A. Pesanan Terakhir (tanggal paling baru sebelum hari ini)
+      const lastDate = pastOrders[0].tanggal
+      const lastMealItems = pastOrders.filter(o => o.tanggal === lastDate)
+      if (lastMealItems.length > 0) {
+        setLastMeal({ date: lastDate, items: lastMealItems })
+      }
+
+      // B. Top 5 kombinasi pesanan yang paling sering dibeli (dikelompokkan per tanggal)
+      const ordersByDate = new Map<string, typeof pastOrders>()
+      for (const row of pastOrders) {
+        const key = row.tanggal
+        if (!ordersByDate.has(key)) ordersByDate.set(key, [])
+        ordersByDate.get(key)!.push(row)
+      }
+
+      const comboMap = new Map<string, {
+        count: number
+        lastDate: string
+        entries: ComboOrderEntry[]
+      }>()
+
+      for (const [dateKey, rows] of ordersByDate.entries()) {
+        const entries: ComboOrderEntry[] = []
+        for (const r of rows) {
+          const menuRel = Array.isArray(r.kantin_menus) ? r.kantin_menus[0] : r.kantin_menus
+          const addonRel = Array.isArray(r.kantin_addons) ? r.kantin_addons[0] : r.kantin_addons
+          if (r.menu_id) {
+            entries.push({
+              menu_id: r.menu_id,
+              addon_id: null,
+              note: (r.deskripsi_pesanan || '').trim(),
+              addonNote: '',
+              nama: menuRel?.nama || 'Menu',
+              snapshotHarga: r.harga || 0,
+            })
+          }
+          if (r.addon_id) {
+            entries.push({
+              menu_id: null,
+              addon_id: r.addon_id,
+              note: '',
+              addonNote: (r.deskripsi_addon || '').trim(),
+              nama: addonRel?.nama || 'Add-On',
+              snapshotHarga: r.addon_id && r.menu_id ? (r.harga_addon || 0) : (r.harga || r.harga_addon || 0),
+            })
+          }
+        }
+        if (entries.length === 0) continue
+
+        const signature = entries
+          .map(e => (e.menu_id ? `m:${e.menu_id}:${e.note.toLowerCase()}` : `a:${e.addon_id}:${e.addonNote.toLowerCase()}`))
+          .sort()
+          .join('|')
+
+        const existing = comboMap.get(signature)
+        if (existing) {
+          existing.count += 1
+          if (dateKey > existing.lastDate) existing.lastDate = dateKey
+        } else {
+          comboMap.set(signature, {
+            count: 1,
+            lastDate: dateKey,
+            entries,
+          })
+        }
+      }
+
+      const jakartaNow = getJakartaDateTime().timeStr
+      const rankedCombos: TopOrderCombo[] = Array.from(comboMap.entries())
+        .sort((a, b) => {
+          if (b[1].count !== a[1].count) return b[1].count - a[1].count
+          return b[1].lastDate.localeCompare(a[1].lastDate)
+        })
+        .slice(0, 5)
+        .map(([signature, data]) => {
+          let totalLivePrice = 0
+          let hasSoldOut = false
+          let hasClosed = false
+          for (const entry of data.entries) {
+            if (entry.menu_id) {
+              const liveMenu = menus.find(m => m.id === entry.menu_id)
+              if (liveMenu) {
+                totalLivePrice += liveMenu.harga || 0
+                if (liveMenu.is_habis) hasSoldOut = true
+                if (liveMenu.is_active === false || (liveMenu.jam_tutup && jakartaNow >= liveMenu.jam_tutup.substring(0, 5))) {
+                  hasClosed = true
+                }
+              } else {
+                totalLivePrice += entry.snapshotHarga
+              }
+            } else if (entry.addon_id) {
+              const liveAddon = addons.find(a => a.id === entry.addon_id)
+              if (liveAddon) {
+                totalLivePrice += liveAddon.harga || 0
+                if (liveAddon.is_habis) hasSoldOut = true
+              } else {
+                totalLivePrice += entry.snapshotHarga
+              }
+            }
+          }
+          return {
+            signature,
+            count: data.count,
+            lastDate: data.lastDate,
+            items: data.entries,
+            totalLivePrice,
+            hasSoldOut,
+            hasClosed,
+          }
+        })
+
+      setTopCombos(rankedCombos)
+
+      // Tampilkan modal saran awal sekali saat login / buka halaman
+      const loginKey = localStorage.getItem('kantin_loginTime') || 'session'
+      const seenKey = `kantin_suggestion_seen_${loginKey}`
+      if (!sessionStorage.getItem(seenKey)) {
+        sessionStorage.setItem(seenKey, '1')
+        setShowSuggestions(true)
       }
     }
 
-    fetchLastMeal()
-  }, [activeProfile?.id])
+    fetchOrderSuggestions()
+  }, [activeProfile?.id, menus, addons, todayStr])
 
   // Addon categories extraction
   const addonCategories = useMemo(() => {
@@ -115,35 +257,44 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     return Array.from(cats).sort()
   }, [addons])
 
-  // Groups extraction
-  const menuGroups = useMemo(() => {
-    const groups = new Set<string>()
+  const isMenuClosed = (menu: { is_active?: boolean | null; jam_tutup?: string | null }, timeStr: string) => {
+    return menu.is_active === false || (!!menu.jam_tutup && timeStr >= menu.jam_tutup.substring(0, 5))
+  }
+
+  // Groups extraction with open/closed status (sorted: Open A-Z first, Closed A-Z after)
+  const menuGroupsInfo = useMemo(() => {
+    const currentJakartaTime = getJakartaDateTime().timeStr
+    const groupMap = new Map<string, { is_active?: boolean | null; jam_tutup?: string | null }[]>()
+
     menus.forEach(m => {
       const code = m.kode_unik || ''
-      if (code.includes('-')) {
-        groups.add(code.split('-')[0])
-      } else {
-        groups.add('Menu Lainnya')
-      }
+      const grp = code.includes('-') ? code.split('-')[0] : 'Menu Lainnya'
+      if (!groupMap.has(grp)) groupMap.set(grp, [])
+      groupMap.get(grp)!.push(m)
     })
-    return Array.from(groups).sort()
+
+    return Array.from(groupMap.entries())
+      .map(([name, groupMenus]) => ({
+        name,
+        isClosed: groupMenus.length > 0 && groupMenus.every(m => isMenuClosed(m, currentJakartaTime)),
+      }))
+      .sort((a, b) => {
+        if (a.isClosed !== b.isClosed) return a.isClosed ? 1 : -1
+        return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' })
+      })
   }, [menus])
 
-  // Set default group
-  useEffect(() => {
-    if (menuGroups.length > 0 && !selectedGroup) {
-      setSelectedGroup(menuGroups[0])
-    }
-  }, [menuGroups, selectedGroup])
+  // Prioritize first OPEN group when user hasn't picked one manually
+  const effectiveGroup = selectedGroup || (menuGroupsInfo.find(g => !g.isClosed) || menuGroupsInfo[0])?.name || ''
 
   // Menus in current group
   const currentGroupMenus = useMemo(() => {
     return menus.filter(m => {
       const code = m.kode_unik || ''
-      if (selectedGroup === 'Menu Lainnya') return !code.includes('-')
-      return code.startsWith(selectedGroup + '-')
+      if (effectiveGroup === 'Menu Lainnya') return !code.includes('-')
+      return code.startsWith(effectiveGroup + '-')
     }).sort((a, b) => (a.kode_unik || '').localeCompare(b.kode_unik || ''))
-  }, [menus, selectedGroup])
+  }, [menus, effectiveGroup])
 
   // Calculate total price
   const totalPrice = useMemo(() => {
@@ -286,79 +437,118 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     }
   }
 
-  const handleReorder = async () => {
-    if (isSubmitting || !lastMeal || lastMeal.items.length === 0) return
-    
-    // Format the items list for the prompt
-    const itemNames = lastMeal.items.map(item => {
-      const name = item.kantin_menus?.nama || item.kantin_addons?.nama || 'Item'
-      const note = item.deskripsi_pesanan || item.deskripsi_addon ? ` (${item.deskripsi_pesanan || item.deskripsi_addon})` : ''
-      return `- ${name}${note}`
-    }).join('\n')
-
-    const proceed = await showConfirm({
-      title: "Pesan Ulang",
-      message: `Apakah Anda ingin memesan ulang pesanan terakhir Anda (Tgl: ${lastMeal.date})?\n\nDetail:\n${itemNames}`,
-      confirmText: "Ya, Pesan Sekarang"
-    })
-    if (!proceed) return
+  const reorderEntries = async (
+    entries: ComboOrderEntry[],
+    confirmTitle: string,
+    confirmHeader: string
+  ) => {
+    if (isSubmitting || entries.length === 0) return
 
     const p_id = activeProfile?.id
     if (!p_id) return
 
-    // CEK JAM TUTUP SEMUA MENU YANG AKAN DI-REORDER
+    // Tutup modal saran lebih dulu agar dialog konfirmasi / peringatan saldo tidak bertumpuk
+    setShowSuggestions(false)
+
     const { dateStr, timeStr: jakartaTimeStr } = getJakartaDateTime()
 
-    for (const oldOrder of lastMeal.items) {
-      if (oldOrder.kantin_menus?.jam_tutup && jakartaTimeStr >= oldOrder.kantin_menus.jam_tutup.substring(0, 5)) {
-        showAlert({
-          title: "Batas Waktu Terlewat",
-          message: `Menu ${oldOrder.kantin_menus.nama} sudah melewati batas waktu pemesanan (${oldOrder.kantin_menus.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
-          type: "error"
-        })
-        return
+    // Cek jam tutup & item habis secara live dari master menus/addons
+    const availableEntries: { entry: ComboOrderEntry; liveMenu?: any; liveAddon?: any }[] = []
+    for (const entry of entries) {
+      if (entry.menu_id) {
+        const liveMenu = menus.find(m => m.id === entry.menu_id)
+        if (!liveMenu) continue
+        if (liveMenu.is_habis) {
+          showAlert({
+            title: 'Menu Habis',
+            message: `Menu ${liveMenu.nama} sedang habis hari ini. Silakan pilih menu lain ya.`,
+            type: 'warning',
+          })
+          return
+        }
+        if (liveMenu.jam_tutup && jakartaTimeStr >= liveMenu.jam_tutup.substring(0, 5)) {
+          showAlert({
+            title: 'Batas Waktu Terlewat',
+            message: `Menu ${liveMenu.nama} sudah melewati batas waktu pemesanan (${liveMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
+            type: 'error',
+          })
+          return
+        }
+        availableEntries.push({ entry, liveMenu })
+      } else if (entry.addon_id) {
+        const liveAddon = addons.find(a => a.id === entry.addon_id)
+        if (!liveAddon) continue
+        if (liveAddon.is_habis) {
+          showAlert({
+            title: 'Add-On Habis',
+            message: `Add-On ${liveAddon.nama} sedang habis hari ini. Silakan pilih menu lain ya.`,
+            type: 'warning',
+          })
+          return
+        }
+        availableEntries.push({ entry, liveAddon })
       }
     }
+
+    if (availableEntries.length === 0) {
+      showAlert({ title: 'Perhatian', message: 'Item pesanan tidak ditemukan di daftar menu aktif.', type: 'warning' })
+      return
+    }
+
+    const itemLines = availableEntries.map(({ entry, liveMenu, liveAddon }) => {
+      const name = liveMenu?.nama || liveAddon?.nama || entry.nama
+      const note = entry.note || entry.addonNote
+      const price = (liveMenu ? liveMenu.harga : liveAddon?.harga) || 0
+      return `- ${name}${note ? ` (${note})` : ''} • Rp ${price.toLocaleString('id-ID')}`
+    }).join('\n')
+
+    const estimatedTotal = availableEntries.reduce(
+      (sum, { liveMenu, liveAddon }) => sum + ((liveMenu ? liveMenu.harga : liveAddon?.harga) || 0),
+      0
+    )
+
+    const proceed = await showConfirm({
+      title: confirmTitle,
+      message: `${confirmHeader}\n\n${itemLines}\n\nTotal: Rp ${estimatedTotal.toLocaleString('id-ID')}`,
+      confirmText: 'Ya, Pesan Sekarang',
+      cancelText: 'Batal',
+    })
+    if (!proceed) return
 
     setIsSubmitting(true)
 
     try {
       const payloads: OrderItemPayload[] = []
-      for (const oldOrder of lastMeal.items) {
-        // Quick check if menu is active
-        if (oldOrder.kantin_menus?.is_active === false) {
+      for (const { entry, liveMenu, liveAddon } of availableEntries) {
+        if (liveMenu?.is_active === false) {
           const force = await showConfirm({
-            title: "Menu Ditutup",
-            message: `Peringatan: Menu ${oldOrder.kantin_menus.nama} sedang ditandai TUTUP. Lanjutkan pesan ini?`,
-            confirmText: "Paksakan Pesan"
+            title: 'Menu Ditutup',
+            message: `Peringatan: Menu ${liveMenu.nama} sedang ditandai TUTUP. Lanjutkan pesan ini?`,
+            confirmText: 'Paksakan Pesan',
           })
           if (!force) continue
         }
 
-        const isMenu = !!oldOrder.menu_id
-        const isAddon = !!oldOrder.addon_id
-        const note = oldOrder.deskripsi_pesanan || oldOrder.deskripsi_addon || ''
-        const m_id = oldOrder.menu_id
-        const a_id = oldOrder.addon_id
-        const price = (isMenu ? oldOrder.kantin_menus?.harga : (isAddon ? oldOrder.kantin_addons?.harga : 0)) || 0
-        let txKet = isMenu ? oldOrder.kantin_menus?.nama : (isAddon ? oldOrder.kantin_addons?.nama : '')
-        
+        const isMenu = !!liveMenu
+        const note = isMenu ? entry.note : entry.addonNote
+        const price = (isMenu ? liveMenu.harga : liveAddon?.harga) || 0
+        let txKet = isMenu ? liveMenu.nama : liveAddon.nama
         if (note) txKet += ` (${note})`
 
         payloads.push({
-          p_menu_id: m_id,
-          p_addon_id: a_id,
+          p_menu_id: isMenu ? liveMenu.id : null,
+          p_addon_id: !isMenu ? liveAddon.id : null,
           p_deskripsi_pesanan: isMenu ? note : '',
-          p_deskripsi_addon: isAddon ? note : '',
+          p_deskripsi_addon: !isMenu ? note : '',
           p_harga: isMenu ? price : 0,
-          p_harga_addon: isAddon ? price : 0,
+          p_harga_addon: !isMenu ? price : 0,
           p_tanggal: dateStr,
-          p_tx_ket: txKet
+          p_tx_ket: txKet,
         })
       }
 
       if (payloads.length === 0) {
-        showAlert({ title: "Perhatian", message: "Tidak ada item valid untuk dipesan ulang.", type: "warning" })
+        showAlert({ title: 'Perhatian', message: 'Tidak ada item valid untuk dipesan ulang.', type: 'warning' })
         return
       }
 
@@ -389,14 +579,53 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
       setOrders(prev => [...newOrders, ...prev])
       router.refresh()
-      showAlert({ title: "Berhasil", message: "Pemesanan ulang berhasil!", type: "success" })
+      showAlert({ title: 'Berhasil', message: 'Pesanan Anda berhasil dibuat!', type: 'success' })
       window.dispatchEvent(new Event('kantin_user_updated'))
-      
     } catch (e: any) {
       await handleOrderError(e, { showAlert, showConfirm }, () => router.push('/topup'), 'Gagal memproses pesanan: ')
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  const handleReorder = async () => {
+    if (!lastMeal || lastMeal.items.length === 0) return
+    const entries: ComboOrderEntry[] = []
+    for (const r of lastMeal.items) {
+      if (r.menu_id) {
+        entries.push({
+          menu_id: r.menu_id,
+          addon_id: null,
+          note: (r.deskripsi_pesanan || '').trim(),
+          addonNote: '',
+          nama: r.kantin_menus?.nama || 'Menu',
+          snapshotHarga: r.harga || 0,
+        })
+      }
+      if (r.addon_id) {
+        entries.push({
+          menu_id: null,
+          addon_id: r.addon_id,
+          note: '',
+          addonNote: (r.deskripsi_addon || '').trim(),
+          nama: r.kantin_addons?.nama || 'Add-On',
+          snapshotHarga: r.harga_addon || r.harga || 0,
+        })
+      }
+    }
+    await reorderEntries(
+      entries,
+      'Ulangi Pesanan Terakhir',
+      `Apakah Anda ingin memesan ulang pesanan terakhir Anda (${lastMeal.date})?`
+    )
+  }
+
+  const handleOrderCombo = async (combo: TopOrderCombo, rankIndex: number) => {
+    await reorderEntries(
+      combo.items,
+      `Pesan Lagi Favorit #${rankIndex + 1}`,
+      `Pesan kombinasi favorit yang sudah ${combo.count}x Anda pesan?`
+    )
   }
 
   const handleDelete = async (orderId: string) => {
@@ -508,50 +737,75 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     return <div className="min-h-[50vh] flex items-center justify-center">Memeriksa sesi...</div>
   }
 
+  const selectedGroupClosed = menuGroupsInfo.find(g => g.name === effectiveGroup)?.isClosed ?? false
+  const currentJakartaTime = getJakartaDateTime().timeStr
+
   return (
-    <div className="space-y-3 md:space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 md:gap-6 items-start pb-32 lg:pb-0">
+    <div className="space-y-4 md:space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 md:gap-6 items-start pb-40 lg:pb-8">
       {/* LEFT COLUMN: MENU SELECTION */}
-      <div className="lg:col-span-7 xl:col-span-8 space-y-3">
+      <div className="lg:col-span-8 space-y-4">
         
         {/* PERSISTENT DEBT WARNING BANNER */}
         {(activeProfile?.saldo ?? 0) < 0 && (
-          <div className="bg-red-600 text-white p-2.5 md:p-3 rounded-lg shadow-md border-2 border-red-700 animate-pulse">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 md:h-5 md:w-5 shrink-0 mt-0.5" />
+          <div className="bg-red-600 text-white p-3.5 rounded-xl shadow-md border-2 border-red-700 animate-pulse">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
               <div>
                 <h3 className="font-black text-xs uppercase tracking-wider">PERINGATAN TUNGGAKAN!</h3>
-                <p className="text-[11px] md:text-xs mt-0.5 font-medium">
-                  Hutang <strong>Rp {Math.abs(activeProfile?.saldo ?? 0).toLocaleString('id-ID')}</strong>. Pesanan mungkin tidak diproses sampai lunasi!
+                <p className="text-xs mt-1 font-medium">
+                  Hutang <strong>Rp {Math.abs(activeProfile?.saldo ?? 0).toLocaleString('id-ID')}</strong>. Yuk top up dulu agar pesananmu bisa diproses!
                 </p>
-                <a href="/topup" className="inline-block mt-1.5 bg-white text-red-700 px-2.5 py-0.5 text-[11px] font-bold rounded hover:bg-red-50">
-                  Top-Up ↗
+                <a href="/topup" className="inline-block mt-2 bg-white text-red-700 px-3 py-1 text-xs font-bold rounded-lg hover:bg-red-50">
+                  Top-Up Sekarang ↗
                 </a>
               </div>
             </div>
           </div>
         )}
 
-        {/* User Info Bar — compact */}
-        <div className="bg-white shadow-sm border border-yellow-200 p-2.5 md:p-3 rounded-lg">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <div className="bg-yellow-100 text-yellow-700 w-8 h-8 md:w-9 md:h-9 flex items-center justify-center rounded-full font-bold text-sm md:text-base shrink-0">
+        {/* Welcome & User Info Card — Gold & White */}
+        <div className="bg-white shadow-xs border border-amber-200 p-3.5 md:p-4 rounded-xl space-y-3">
+          {/* Sweet Daily Welcome Remark */}
+          <div className="bg-gradient-to-r from-amber-50 via-yellow-50/80 to-white border border-amber-200/80 rounded-xl px-3.5 py-2.5">
+            <p className="text-xs md:text-sm font-black text-amber-900">
+              {welcomeData.timeGreeting}, {activeProfile?.nama}! ✨
+            </p>
+            <p className="text-[11px] md:text-xs text-amber-800/90 mt-0.5 leading-relaxed">
+              {welcomeData.sweetRemark}
+            </p>
+          </div>
+
+          <div className="flex justify-between items-center gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="bg-amber-100 text-amber-800 border border-amber-200 w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-full font-black text-sm md:text-base shrink-0">
                 {activeProfile?.nama?.charAt(0).toUpperCase()}
               </div>
-              <div>
-                <p className="text-xs md:text-sm font-black text-slate-800 leading-tight">{activeProfile?.nama}</p>
-                <p className="text-[10px] text-slate-400 leading-tight">{activeProfile?.divisi || 'Tanpa Divisi'}</p>
+              <div className="min-w-0">
+                <p className="text-sm font-black text-slate-800 leading-tight truncate">{activeProfile?.nama}</p>
+                <p className="text-[11px] text-slate-400 leading-tight truncate">{activeProfile?.divisi || 'Tanpa Divisi'}</p>
               </div>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+              {(lastMeal || topCombos.length > 0) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowSuggestions(true)}
+                  className="text-amber-700 border-amber-300 bg-amber-50/70 hover:bg-amber-100 text-[11px] h-7 px-2.5 font-bold rounded-lg"
+                >
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  Saran
+                </Button>
+              )}
               <Dialog open={showPinModal} onOpenChange={setShowPinModal}>
                 <DialogTrigger 
                   render={
                     <Button 
                       variant="outline" 
                       size="sm" 
-                      className="text-slate-600 border-slate-200 hover:bg-slate-50 text-[10px] h-6 px-2 font-bold"
+                      className="text-slate-600 border-slate-200 hover:bg-slate-50 text-[11px] h-7 px-2.5 font-bold rounded-lg"
                     />
                   }
                 >
@@ -588,11 +842,11 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                         inputMode="numeric"
                         value={newPin}
                         onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
-                        className="text-center tracking-widest font-mono border-yellow-300 focus-visible:ring-yellow-500"
+                        className="text-center tracking-widest font-mono border-amber-300 focus-visible:ring-amber-500"
                         placeholder="•••••"
                       />
                     </div>
-                    <Button type="submit" disabled={pinLoading} className="w-full bg-yellow-500 hover:bg-yellow-600 font-bold mt-2">
+                    <Button type="submit" disabled={pinLoading} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold mt-2">
                       {pinLoading ? 'Menyimpan...' : 'Simpan PIN Baru'}
                     </Button>
                   </form>
@@ -602,7 +856,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 text-[10px] h-6 px-2 font-bold"
+                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 text-[11px] h-7 px-2.5 font-bold rounded-lg"
                 onClick={() => {
                   localStorage.removeItem('kantin_userName')
                   localStorage.removeItem('kantin_loginTime')
@@ -615,29 +869,29 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           </div>
 
           {/* Saldo + Last Meal row */}
-          <div className="grid grid-cols-2 gap-1.5 mt-2 pt-2 border-t border-slate-100">
-            <div className="bg-slate-50 px-2.5 py-1.5 rounded-lg flex items-center justify-between border border-slate-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2.5 border-t border-amber-100">
+            <div className="bg-amber-50/40 px-3 py-2 rounded-xl flex items-center justify-between border border-amber-100">
               <div>
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Saldo</span>
+                <span className="text-[10px] font-bold text-amber-700/70 uppercase tracking-wider block">Saldo Anda</span>
                 {(activeProfile?.saldo ?? 0) < 0 ? (
-                  <span className="text-xs font-black text-red-600">-Rp {Math.abs(activeProfile?.saldo ?? 0).toLocaleString('id-ID')}</span>
+                  <span className="text-sm font-black text-red-600">-Rp {Math.abs(activeProfile?.saldo ?? 0).toLocaleString('id-ID')}</span>
                 ) : (
-                  <span className="text-xs font-black text-green-600">Rp {(activeProfile?.saldo || 0).toLocaleString('id-ID')}</span>
+                  <span className="text-sm font-black text-emerald-600">Rp {(activeProfile?.saldo || 0).toLocaleString('id-ID')}</span>
                 )}
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1.5">
                 <Button 
                   variant="outline" 
                   size="sm"
-                  className="h-5 text-[9px] px-1.5 bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                  className="h-7 text-[11px] px-2.5 bg-white text-slate-600 border-amber-200 hover:bg-amber-50 rounded-lg font-semibold"
                   onClick={openHistory}
                 >
-                  Hist
+                  Riwayat
                 </Button>
                 <Button 
                   variant="outline" 
                   size="sm"
-                  className="h-5 text-[9px] px-1.5 bg-white text-blue-600 border-blue-200 hover:bg-blue-50"
+                  className="h-7 text-[11px] px-2.5 bg-amber-500 text-white border-amber-500 hover:bg-amber-600 hover:text-white rounded-lg font-bold"
                   onClick={() => window.location.href = '/topup'}
                 >
                   Top Up
@@ -647,181 +901,212 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
             {lastMeal && lastMeal.items.length > 0 ? (
               <div 
-                className="bg-yellow-50 px-2.5 py-1.5 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors"
+                className="bg-amber-50 px-3 py-2 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/80 transition-colors flex flex-col justify-center"
                 onClick={handleReorder}
               >
-                <span className="text-[9px] font-bold text-yellow-700 uppercase tracking-wider block">↩ Ulangi ({lastMeal.date})</span>
-                <span className="text-[10px] font-bold text-yellow-900 line-clamp-1">
+                <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">↩ Ulangi Terakhir ({lastMeal.date})</span>
+                <span className="text-xs font-bold text-amber-950 line-clamp-1 mt-0.5">
                   {lastMeal.items.map(i => i.kantin_menus?.nama || i.kantin_addons?.nama).join(', ')}
                 </span>
               </div>
             ) : (
-              <div className="bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Pesanan Terakhir</span>
-                <span className="text-[10px] font-bold text-slate-400 italic">Belum ada riwayat</span>
+              <div className="bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 flex flex-col justify-center">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pesanan Terakhir</span>
+                <span className="text-xs font-medium text-slate-400 italic mt-0.5">Belum ada riwayat pesanan</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Group & Addon Selectors — compact inline bar */}
-        <div className="flex gap-2 sticky top-12 md:top-14 z-20 bg-white/95 backdrop-blur-sm py-2 -mx-3 px-3 md:mx-0 md:px-0 border-b border-slate-100 shadow-sm">
+        {/* Group & Addon Selectors — balanced 2-column Gold & White bar */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sticky top-12 md:top-14 z-20 bg-white/95 backdrop-blur-sm p-2.5 rounded-xl border border-amber-200 shadow-xs">
           {/* Menu Utama */}
-          <div className="flex-1 flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
-            <span className="text-[9px] font-black text-yellow-700 uppercase tracking-widest shrink-0">🍽</span>
-            <Select value={selectedGroup} onValueChange={(val) => val && setSelectedGroup(val)}>
-              <SelectTrigger className="h-7 border-0 bg-transparent text-xs font-bold text-yellow-900 p-0 shadow-none focus:ring-0 gap-1">
-                <SelectValue placeholder="Menu Utama..." />
+          <div className="flex items-center gap-2 bg-amber-50/70 border border-amber-200 rounded-lg px-3 py-2">
+            <span className="text-xs font-black text-amber-700 shrink-0">🍽</span>
+            <Select value={effectiveGroup} onValueChange={(val) => val && setSelectedGroup(val)}>
+              <SelectTrigger className={`w-full h-7 border-0 bg-transparent text-xs md:text-sm font-bold p-0 shadow-none focus:ring-0 gap-1 ${selectedGroupClosed ? 'text-slate-500' : 'text-amber-950'}`}>
+                <SelectValue placeholder="Pilih Toko / Menu Utama..." />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
-                {menuGroups.map(grp => (
-                  <SelectItem key={grp} value={grp} className="font-semibold text-xs">{grp}</SelectItem>
+                {menuGroupsInfo.map(({ name, isClosed }) => (
+                  <SelectItem
+                    key={name}
+                    value={name}
+                    className={`font-semibold text-xs ${isClosed ? 'text-slate-400 italic' : 'text-amber-950'}`}
+                  >
+                    {isClosed ? `${name} (Tutup)` : name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
-          {/* Add-On */}
-          <div className="flex-1 flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">
-            <span className="text-[9px] font-black text-blue-700 uppercase tracking-widest shrink-0">☕</span>
+          {/* Add-On — Gold & White palette */}
+          <div className="flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
+            <span className="text-xs font-black text-amber-600 shrink-0">☕</span>
             <Select value={selectedAddonCategory} onValueChange={(val) => val && setSelectedAddonCategory(val)}>
-              <SelectTrigger className="h-7 border-0 bg-transparent text-xs font-bold text-blue-900 p-0 shadow-none focus:ring-0 gap-1">
-                <SelectValue placeholder="Add-On..." />
+              <SelectTrigger className="w-full h-7 border-0 bg-transparent text-xs md:text-sm font-bold text-amber-900 p-0 shadow-none focus:ring-0 gap-1">
+                <SelectValue placeholder="Pilih Add-On / Minuman..." />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
                 {addonCategories.map(cat => (
-                  <SelectItem key={cat} value={cat} className="font-semibold text-xs">{cat}</SelectItem>
+                  <SelectItem key={cat} value={cat} className="font-semibold text-xs text-amber-950">{cat}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
         </div>
 
-        {/* Menu Items Checkboxes */}
-        {selectedGroup && selectedGroup !== 'none' && (
-          <div className="bg-white rounded-lg border border-yellow-200 overflow-hidden shadow-sm">
-            <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-200 font-bold text-yellow-800 text-xs md:text-sm">
-              Makanan Utama: {selectedGroup}
+        {/* Menu Items Grid */}
+        {effectiveGroup && effectiveGroup !== 'none' && (
+          <div className="bg-white rounded-xl border border-amber-200 overflow-hidden shadow-xs">
+            <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-white border-b border-amber-200 flex items-center justify-between gap-2">
+              <div className="font-black text-amber-900 text-sm md:text-base">
+                Makanan Utama: {effectiveGroup}
+              </div>
+              {selectedGroupClosed && (
+                <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold uppercase">
+                  Sedang Tutup
+                </span>
+              )}
             </div>
-            <div className="divide-y divide-yellow-100">
+            <div className="p-3.5 md:p-4">
               {currentGroupMenus.length === 0 ? (
-                <p className="p-4 text-center text-xs text-slate-500">Tidak ada menu di kelompok ini.</p>
+                <p className="p-6 text-center text-xs text-slate-500">Tidak ada menu di kelompok ini.</p>
               ) : (
-                currentGroupMenus.map(menu => {
-                  // @ts-ignore
-                  const isHabis = menu.is_habis === true
-                  const isTutup = menu.is_active === false
-                  const isChecked = checkedItems.includes(menu.id)
-                  
-                  return (
-                    <div key={menu.id} className="transition-colors hover:bg-slate-50">
-                      <div 
-                        className={`px-3 py-2 flex items-center gap-2 md:gap-3 ${isChecked ? 'bg-yellow-50/50' : ''} ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
-                        onClick={() => toggleItem(menu.id, isHabis, isTutup)}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {currentGroupMenus.map(menu => {
+                    // @ts-ignore
+                    const isHabis = menu.is_habis === true
+                    const isTutup = isMenuClosed(menu, currentJakartaTime)
+                    const isChecked = checkedItems.includes(menu.id)
+                    
+                    return (
+                      <div
+                        key={menu.id}
+                        className={`rounded-xl border p-3.5 transition-all ${
+                          isChecked
+                            ? 'border-amber-400 bg-amber-50/70 ring-1 ring-amber-300/60 shadow-xs'
+                            : 'border-amber-100 bg-white hover:border-amber-300 hover:bg-amber-50/20'
+                        }`}
                       >
-                        <Checkbox 
-                          checked={isChecked} 
-                          className={`h-4 w-4 md:h-5 md:w-5 border-yellow-400 data-[state=checked]:bg-yellow-500 ${isHabis ? 'opacity-50' : ''} shrink-0`}
-                          onCheckedChange={() => toggleItem(menu.id, isHabis, isTutup)}
-                          onClick={e => e.stopPropagation()}
-                          disabled={isHabis}
-                        />
+                        <div 
+                          className={`flex items-center gap-3 ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+                          onClick={() => toggleItem(menu.id, isHabis, isTutup)}
+                        >
+                          <Checkbox 
+                            checked={isChecked} 
+                            className={`h-5 w-5 border-amber-400 data-[state=checked]:bg-amber-500 ${isHabis ? 'opacity-50' : ''} shrink-0`}
+                            onCheckedChange={() => toggleItem(menu.id, isHabis, isTutup)}
+                            onClick={e => e.stopPropagation()}
+                            disabled={isHabis}
+                          />
+                          
+                          {menu.foto_url ? (
+                            <img src={menu.foto_url} alt={menu.nama} className="w-12 h-12 md:w-14 md:h-14 object-cover rounded-lg border border-amber-100 bg-white shrink-0" />
+                          ) : (
+                            <div className="w-12 h-12 md:w-14 md:h-14 bg-amber-50/70 text-amber-400 flex items-center justify-center rounded-lg border border-amber-100 shrink-0">
+                              <ImageIcon className="h-5 w-5" />
+                            </div>
+                          )}
+
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-start justify-between gap-1.5">
+                              <p className={`font-bold text-xs md:text-sm leading-snug line-clamp-2 ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+                                {menu.nama}
+                              </p>
+                              {isHabis && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Habis</span>}
+                              {isTutup && !isHabis && <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Tutup</span>}
+                            </div>
+                            <p className="text-xs md:text-sm text-amber-700 font-black">Rp {menu.harga.toLocaleString('id-ID')}</p>
+                          </div>
+                        </div>
                         
-                        {menu.foto_url ? (
-                          <img src={menu.foto_url} alt={menu.nama} className="w-9 h-9 md:w-11 md:h-11 object-cover rounded border bg-white shrink-0" />
-                        ) : (
-                          <div className="w-9 h-9 md:w-11 md:h-11 bg-slate-100 text-slate-400 flex items-center justify-center rounded shrink-0">
-                            <ImageIcon className="h-4 w-4" />
+                        {/* Per-Item Note — roomy padding & height */}
+                        {isChecked && (
+                          <div className="mt-3 pt-2.5 border-t border-amber-200/70">
+                            <Input 
+                              placeholder="Keterangan... cth: pedas, tambah kuah" 
+                              value={itemNotes[menu.id] || ''}
+                              onChange={e => setItemNotes(prev => ({...prev, [menu.id]: e.target.value}))}
+                              className="h-9 text-xs px-3 bg-white border-amber-300 focus-visible:ring-amber-500 rounded-lg"
+                            />
                           </div>
                         )}
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <p className={`font-bold text-xs md:text-sm truncate ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
-                              {menu.nama}
-                            </p>
-                            {isHabis && <span className="text-[8px] md:text-[9px] bg-slate-200 text-slate-600 px-1 py-0.5 rounded font-bold uppercase shrink-0">Habis</span>}
-                            {isTutup && !isHabis && <span className="text-[8px] md:text-[9px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold uppercase shrink-0">Tutup</span>}
-                          </div>
-                          <p className="text-[10px] md:text-xs text-yellow-600 font-bold">Rp {menu.harga.toLocaleString('id-ID')}</p>
-                        </div>
                       </div>
-                      
-                      {/* Per-Item Note */}
-                      {isChecked && (
-                        <div className="pl-9 md:pl-12 pr-3 pb-2 pt-0.5">
-                          <Input 
-                            placeholder="Catatan... cth: pedas, tambah kuah" 
-                            value={itemNotes[menu.id] || ''}
-                            onChange={e => setItemNotes(prev => ({...prev, [menu.id]: e.target.value}))}
-                            className="h-7 text-[11px] bg-white border-yellow-300 focus-visible:ring-yellow-500"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )
-                })
+                    )
+                  })}
+                </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Addons Items Checkboxes */}
+        {/* Addons Items Grid — Gold & White palette */}
         {selectedAddonCategory && selectedAddonCategory !== 'none' && (
-          <div className="bg-white rounded-lg border border-blue-200 overflow-hidden shadow-sm">
-            <div className="px-3 py-2 bg-blue-50 border-b border-blue-200 font-bold text-blue-800 text-xs md:text-sm">
+          <div className="bg-white rounded-xl border border-amber-200 overflow-hidden shadow-xs">
+            <div className="px-4 py-3 bg-gradient-to-r from-amber-50/70 to-white border-b border-amber-200 font-black text-amber-900 text-sm md:text-base">
               Add-On: {selectedAddonCategory}
             </div>
-            <div className="divide-y divide-blue-100">
+            <div className="p-3.5 md:p-4">
               {addons.filter(a => a.kategori === selectedAddonCategory).length === 0 ? (
-                <p className="p-4 text-center text-xs text-slate-500">Tidak ada add-on.</p>
+                <p className="p-6 text-center text-xs text-slate-500">Tidak ada add-on.</p>
               ) : (
-                addons.filter(a => a.kategori === selectedAddonCategory).map(addon => {
-                  // @ts-ignore
-                  const isHabis = addon.is_habis === true
-                  const isChecked = checkedItems.includes(addon.id)
-                  
-                  return (
-                    <div key={addon.id} className="transition-colors hover:bg-slate-50">
-                      <div 
-                        className={`px-3 py-2 flex items-center gap-2 md:gap-3 ${isChecked ? 'bg-blue-50/50' : ''} ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
-                        onClick={() => toggleItem(addon.id, isHabis, false)}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {addons.filter(a => a.kategori === selectedAddonCategory).map(addon => {
+                    // @ts-ignore
+                    const isHabis = addon.is_habis === true
+                    const isChecked = checkedItems.includes(addon.id)
+                    
+                    return (
+                      <div
+                        key={addon.id}
+                        className={`rounded-xl border p-3.5 transition-all ${
+                          isChecked
+                            ? 'border-amber-400 bg-amber-50/70 ring-1 ring-amber-300/60 shadow-xs'
+                            : 'border-amber-100 bg-white hover:border-amber-300 hover:bg-amber-50/20'
+                        }`}
                       >
-                        <Checkbox 
-                          checked={isChecked} 
-                          className={`h-4 w-4 md:h-5 md:w-5 border-blue-400 data-[state=checked]:bg-blue-600 ${isHabis ? 'opacity-50' : ''} shrink-0`}
-                          onCheckedChange={() => toggleItem(addon.id, isHabis, false)}
-                          onClick={e => e.stopPropagation()}
-                          disabled={isHabis}
-                        />
-                        
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <p className={`font-bold text-xs md:text-sm truncate ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
-                              {addon.nama}
-                            </p>
-                            {isHabis && <span className="text-[8px] md:text-[9px] bg-slate-200 text-slate-600 px-1 py-0.5 rounded font-bold uppercase shrink-0">Habis</span>}
-                          </div>
-                          <p className="text-[10px] md:text-xs text-blue-600 font-bold">Rp {addon.harga.toLocaleString('id-ID')}</p>
-                        </div>
-                      </div>
-                      
-                      {/* Per-Item Note */}
-                      {isChecked && (
-                        <div className="pl-7 md:pl-9 pr-3 pb-2 pt-0.5">
-                          <Input 
-                            placeholder="Catatan... cth: es sedikit" 
-                            value={itemNotes[addon.id] || ''}
-                            onChange={e => setItemNotes(prev => ({...prev, [addon.id]: e.target.value}))}
-                            className="h-7 text-[11px] bg-white border-blue-300 focus-visible:ring-blue-500"
+                        <div 
+                          className={`flex items-center gap-3 ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+                          onClick={() => toggleItem(addon.id, isHabis, false)}
+                        >
+                          <Checkbox 
+                            checked={isChecked} 
+                            className={`h-5 w-5 border-amber-400 data-[state=checked]:bg-amber-500 ${isHabis ? 'opacity-50' : ''} shrink-0`}
+                            onCheckedChange={() => toggleItem(addon.id, isHabis, false)}
+                            onClick={e => e.stopPropagation()}
+                            disabled={isHabis}
                           />
+                          
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <div className="flex items-start justify-between gap-1.5">
+                              <p className={`font-bold text-xs md:text-sm leading-snug ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+                                {addon.nama}
+                              </p>
+                              {isHabis && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Habis</span>}
+                            </div>
+                            <p className="text-xs md:text-sm text-amber-700 font-black">Rp {addon.harga.toLocaleString('id-ID')}</p>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  )
-                })
+                        
+                        {/* Per-Item Note */}
+                        {isChecked && (
+                          <div className="mt-3 pt-2.5 border-t border-amber-200/70">
+                            <Input 
+                              placeholder="Keterangan... cth: es sedikit, manis" 
+                              value={itemNotes[addon.id] || ''}
+                              onChange={e => setItemNotes(prev => ({...prev, [addon.id]: e.target.value}))}
+                              className="h-9 text-xs px-3 bg-white border-amber-300 focus-visible:ring-amber-500 rounded-lg"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               )}
             </div>
           </div>
@@ -829,14 +1114,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       </div>
 
       {/* RIGHT / MOBILE STICKY CART */}
-      <div className="lg:col-span-5 xl:col-span-4 space-y-3">
+      <div className="lg:col-span-4 lg:sticky lg:top-20 space-y-3">
         
         <div className="fixed bottom-0 left-0 right-0 lg:static lg:bottom-auto z-50">
-          <Card className="border-yellow-200 shadow-[0_-6px_16px_rgba(0,0,0,0.12)] rounded-none lg:rounded-xl lg:shadow-sm overflow-hidden">
+          <Card className="border-amber-200 shadow-[0_-6px_16px_rgba(0,0,0,0.12)] rounded-none lg:rounded-xl lg:shadow-sm overflow-hidden">
             {/* Cart header bar */}
-            <div className="bg-yellow-500 px-3 py-2 md:py-2.5 text-white flex justify-between items-center">
-              <div className="flex items-center gap-1.5 font-bold text-xs md:text-sm">
-                <ShoppingBag className="h-3.5 w-3.5 md:h-4 md:w-4" />
+            <div className="bg-amber-500 px-4 py-2.5 md:py-3 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2 font-bold text-xs md:text-sm">
+                <ShoppingBag className="h-4 w-4" />
                 <span>Keranjang {checkedItems.length > 0 && `(${checkedItems.length})`}</span>
               </div>
               <div className="text-sm md:text-base font-black">
@@ -844,19 +1129,19 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
               </div>
             </div>
 
-            <div className="px-3 py-2 bg-white">
+            <div className="px-4 py-3 bg-white">
               {checkedItems.length > 0 ? (
-                <div className="mb-2 max-h-[60px] md:max-h-[120px] overflow-y-auto space-y-1 border-b border-slate-100 pb-2 pr-0.5">
+                <div className="mb-3 max-h-[75px] md:max-h-[160px] overflow-y-auto space-y-1.5 border-b border-amber-100 pb-2.5 pr-1">
                   {checkedItems.map(id => {
                     const item = menus.find(m => m.id === id) || addons.find(a => a.id === id)
                     if (!item) return null
                     return (
-                      <div key={id} className="flex justify-between items-start text-[10px] md:text-xs">
+                      <div key={id} className="flex justify-between items-start text-xs">
                         <div className="flex-1 pr-2">
                           <p className="font-bold text-slate-700 leading-tight">{item.nama}</p>
-                          {itemNotes[id] && <p className="text-[9px] text-slate-400 italic mt-0.5">"{itemNotes[id]}"</p>}
+                          {itemNotes[id] && <p className="text-[10px] text-amber-700 italic mt-0.5">"{itemNotes[id]}"</p>}
                         </div>
-                        <div className="font-bold text-yellow-700 shrink-0 tabular-nums">
+                        <div className="font-bold text-amber-700 shrink-0 tabular-nums">
                           {item.harga.toLocaleString('id-ID')}
                         </div>
                       </div>
@@ -864,7 +1149,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                   })}
                 </div>
               ) : (
-                <p className="text-[10px] md:text-xs text-slate-400 mb-2 text-center py-0.5">
+                <p className="text-xs text-slate-400 mb-3 text-center py-1">
                   Belum ada menu dipilih.
                 </p>
               )}
@@ -873,7 +1158,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                 <Button 
                   onClick={handleOrder}
                   disabled={checkedItems.length === 0 || isSubmitting}
-                  className="flex-1 h-8 md:h-10 font-bold text-xs md:text-sm bg-yellow-500 hover:bg-yellow-600 text-white"
+                  className="flex-1 h-10 font-bold text-xs md:text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg"
                 >
                   {isSubmitting ? 'Proses...' : 'Pesan Sekarang'}
                 </Button>
@@ -881,10 +1166,10 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                 <Dialog>
                   <DialogTrigger 
                     render={
-                      <Button variant="outline" className="h-8 md:h-10 border-yellow-200 text-yellow-700 bg-yellow-50/50 hover:bg-yellow-100 font-bold text-[10px] md:text-xs px-2 md:px-3" />
+                      <Button variant="outline" className="h-10 border-amber-200 text-amber-800 bg-amber-50/70 hover:bg-amber-100 font-bold text-xs px-3 rounded-lg" />
                     }
                   >
-                    <ShoppingBag className="w-3 h-3 mr-1" />
+                    <ShoppingBag className="w-3.5 h-3.5 mr-1.5" />
                     Saya ({myOrders.length})
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
@@ -983,6 +1268,149 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                 </div>
               ))
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Saran Awal Modal saat Login (Opsi A: Pesanan Terakhir, B: Top 5 Kombinasi, C: Abaikan Besar) */}
+      <Dialog open={showSuggestions} onOpenChange={setShowSuggestions}>
+        <DialogContent className="sm:max-w-lg w-[94vw] max-h-[88vh] overflow-y-auto rounded-2xl border-2 border-amber-200 bg-white p-4 sm:p-6">
+          <DialogHeader className="space-y-2 text-left">
+            <div className="inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full w-fit">
+              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+              Saran Menu Untukmu
+            </div>
+            <DialogTitle className="text-base sm:text-lg font-black text-amber-950">
+              {welcomeData.timeGreeting}, {activeProfile?.nama}! ✨
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm text-amber-800/90 leading-relaxed">
+              {welcomeData.sweetRemark}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-2">
+            {/* OPSI A: PESANAN TERAKHIR */}
+            {lastMeal && lastMeal.items.length > 0 && (
+              <div className="rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-yellow-50/60 to-white p-3.5 sm:p-4 space-y-2.5 shadow-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 uppercase tracking-wide">
+                    <Clock className="h-3.5 w-3.5 text-amber-600" />
+                    <span>A. Pesanan Terakhir</span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-amber-700 bg-white border border-amber-200 px-2 py-0.5 rounded-full">
+                    {lastMeal.date}
+                  </span>
+                </div>
+                <div className="space-y-1 text-xs text-slate-700">
+                  {lastMeal.items.map((item, idx) => {
+                    const name = item.kantin_menus?.nama || item.kantin_addons?.nama || 'Menu'
+                    const note = item.deskripsi_pesanan || item.deskripsi_addon
+                    return (
+                      <div key={idx} className="flex items-start justify-between gap-2">
+                        <span>
+                          • <strong className="text-slate-900">{name}</strong>
+                          {note && <span className="text-amber-700 italic"> ({note})</span>}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="pt-1 flex justify-end">
+                  <Button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={handleReorder}
+                    className="w-full sm:w-auto h-9 px-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg shadow-xs"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                    Pesan Lagi Pesanan Terakhir
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* OPSI B: TOP 5 KOMBINASI SERING DIBELI */}
+            {topCombos.length > 0 && (
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 uppercase tracking-wide px-0.5">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                  <span>B. Top {topCombos.length} Kombinasi Favoritmu</span>
+                </div>
+                <div className="space-y-2.5">
+                  {topCombos.map((combo, idx) => (
+                    <div
+                      key={combo.signature}
+                      className="rounded-xl border border-amber-200 bg-white hover:border-amber-300 p-3.5 transition-colors shadow-2xs space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-black">
+                            #{idx + 1}
+                          </span>
+                          <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                            {combo.count}x dipesan
+                          </span>
+                          {combo.hasSoldOut && (
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              Ada item habis
+                            </span>
+                          )}
+                          {combo.hasClosed && !combo.hasSoldOut && (
+                            <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                              Ada menu tutup
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-black text-amber-700 tabular-nums">
+                          Rp {combo.totalLivePrice.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {combo.items.map((entry, itemIdx) => (
+                          <span
+                            key={itemIdx}
+                            className="inline-flex items-center text-[11px] font-semibold bg-amber-50/70 text-slate-800 border border-amber-100 px-2.5 py-1 rounded-lg"
+                          >
+                            {entry.nama}
+                            {(entry.note || entry.addonNote) && (
+                              <span className="text-amber-700 italic ml-1">
+                                ({entry.note || entry.addonNote})
+                              </span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="pt-1 flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={isSubmitting || combo.hasSoldOut}
+                          onClick={() => handleOrderCombo(combo, idx)}
+                          className="w-full sm:w-auto h-8 px-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg"
+                        >
+                          <RotateCcw className="h-3 w-3 mr-1.5" />
+                          Pesan Lagi
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* OPSI C: ABAIKAN (TOMBOL BESAR DENGAN PADDING BESAR) */}
+            <div className="pt-2 border-t border-amber-100">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowSuggestions(false)}
+                className="w-full h-auto py-5 sm:py-6 px-6 text-sm sm:text-base font-extrabold text-amber-900 bg-white hover:bg-amber-50 border-2 border-amber-300 rounded-xl shadow-xs transition-all"
+              >
+                Abaikan &amp; Pilih Menu Lain
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
