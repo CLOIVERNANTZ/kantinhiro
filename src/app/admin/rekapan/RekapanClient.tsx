@@ -638,8 +638,14 @@ export default function RekapanClient({ initialOrders, initialDate, profiles, me
                 <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2.5">
                   <Label className="text-xs font-black text-amber-900 uppercase tracking-wide">1. Pilih Pemesan</Label>
                   <Select value={manualUser} onValueChange={(v) => handleSelectManualUser(v || '')}>
-                    <SelectTrigger className="bg-white border-amber-300 font-semibold text-sm h-10">
-                      <SelectValue placeholder="Pilih nama pemesan..." />
+                    <SelectTrigger className="bg-white border-amber-300 font-semibold text-sm h-10 w-full">
+                      <SelectValue placeholder="Pilih nama pemesan...">
+                        {(value: string) => {
+                          const prof = activeProfiles.find(p => p.id === value)
+                          if (!prof) return <span className="text-muted-foreground">Pilih nama pemesan...</span>
+                          return prof.nama
+                        }}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent className="max-h-[240px]">
                       {activeProfiles.map(p => {
@@ -852,8 +858,10 @@ export default function RekapanClient({ initialOrders, initialDate, profiles, me
                       <div className="space-y-1">
                         <Label className="text-[11px] font-bold text-amber-900">Grup / Toko (Aktif)</Label>
                         <Select value={effectiveManualGroup} onValueChange={(v) => setManualSelectedGroup(v || '')}>
-                          <SelectTrigger className="bg-white border-amber-200 h-9 text-xs font-bold text-amber-950">
-                            <SelectValue placeholder="Pilih toko..." />
+                          <SelectTrigger className="bg-white border-amber-200 h-9 text-xs font-bold text-amber-950 w-full">
+                            <SelectValue placeholder="Pilih toko...">
+                              {(value: string) => value === 'none' ? '-- Sembunyikan --' : (value || 'Pilih toko...')}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
@@ -869,8 +877,10 @@ export default function RekapanClient({ initialOrders, initialDate, profiles, me
                       <div className="space-y-1">
                         <Label className="text-[11px] font-bold text-amber-900">Add-On / Minuman</Label>
                         <Select value={manualSelectedAddonCat} onValueChange={(v) => setManualSelectedAddonCat(v || 'none')}>
-                          <SelectTrigger className="bg-white border-amber-200 h-9 text-xs font-bold text-amber-950">
-                            <SelectValue placeholder="Pilih add-on..." />
+                          <SelectTrigger className="bg-white border-amber-200 h-9 text-xs font-bold text-amber-950 w-full">
+                            <SelectValue placeholder="Pilih add-on...">
+                              {(value: string) => value === 'none' ? '-- Sembunyikan --' : (value || 'Pilih add-on...')}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none" className="text-slate-400 text-xs italic">-- Sembunyikan --</SelectItem>
