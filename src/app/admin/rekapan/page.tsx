@@ -27,7 +27,7 @@ export default async function RekapanPage() {
         kantin_addons(nama)
       `)
       .eq('tanggal', todayStr),
-    supabase.from('kantin_profiles').select('id, nama').order('nama'),
+    supabase.from('kantin_profiles').select('id, nama, divisi, saldo, status').order('nama'),
     supabase.from('kantin_menus').select('*').eq('is_active', true).order('nama'),
     supabase.from('kantin_addons').select('*').eq('is_active', true).order('nama')
   ])

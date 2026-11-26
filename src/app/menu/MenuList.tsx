@@ -13,7 +13,19 @@ import { useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertCircle, Search, ShoppingBag } from 'lucide-react'
 import { useAppDialog } from '@/components/AppDialogProvider'
-import { fetchLiveSaldoAndValidate, getJakartaDateTime, handleFailedSaldoCheck, handleOrderError, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
+import {
+  clearUserSessionStorage,
+  fetchLiveSaldoAndValidate,
+  findProfileFromSession,
+  getJakartaDateTime,
+  getMenuClosedReason,
+  handleFailedSaldoCheck,
+  handleOrderError,
+  KantinProfile,
+  OrderItemPayload,
+  showClosedMenuAlert,
+  submitOrderBatch,
+} from '@/lib/orderClient'
 
 export default function MenuList({ menus, addons, profiles, orders }: { menus: any[], addons: any[], profiles: any[], orders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
@@ -65,24 +77,20 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
     const savedName = localStorage.getItem('kantin_userName')
     const loginTime = localStorage.getItem('kantin_loginTime')
     if (!savedName || !loginTime || (Date.now() - parseInt(loginTime)) > 3600000) {
-      localStorage.removeItem('kantin_userName')
-      localStorage.removeItem('kantin_loginTime')
-      localStorage.removeItem('kantin_profile_id')
+      clearUserSessionStorage()
       window.location.href = '/login'
       return
     }
     
-    // Auto find active profile by name
-    const profile = profiles.find(p => p.nama?.toLowerCase() === savedName.toLowerCase())
+    // Prefer profile_id lookup, fallback to nama
+    const profile = findProfileFromSession(profiles)
     if (profile && profile.status !== 'inactive') {
       setActiveProfile(profile)
       setProfileName(profile.nama)
       setProfileDivisi(profile.divisi || '')
       setAuthChecking(false)
     } else {
-      localStorage.removeItem('kantin_userName')
-      localStorage.removeItem('kantin_loginTime')
-      localStorage.removeItem('kantin_profile_id')
+      clearUserSessionStorage()
       window.location.href = '/login'
     }
   }, [profiles])
@@ -117,23 +125,21 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
 
     const { dateStr, timeStr } = getJakartaDateTime()
 
-    // Cutoff time check
-    if (selectedMenu.jam_tutup && timeStr >= selectedMenu.jam_tutup.substring(0, 5)) {
+    if (selectedMenu.is_habis) {
+      setIsOpen(false)
       showAlert({
-        title: "Batas Waktu Terlewat",
-        message: `Menu ${selectedMenu.nama} sudah melewati batas waktu pemesanan (${selectedMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
-        type: "error"
+        title: "Menu Habis",
+        message: `Menu ${selectedMenu.nama} sedang habis hari ini.`,
+        type: "warning"
       })
       return
     }
 
-    if (selectedMenu?.is_active === false) {
-      const proceed = await showConfirm({
-        title: "Menu Ditutup",
-        message: "Menu/Grup ini sedang ditandai TUTUP oleh Admin.\n\nApakah Anda yakin ingin memaksa pesan?",
-        confirmText: "Paksakan Pesan"
-      })
-      if (!proceed) return
+    const closedReason = getMenuClosedReason(selectedMenu, timeStr)
+    if (closedReason) {
+      setIsOpen(false)
+      showClosedMenuAlert(showAlert, selectedMenu.nama, closedReason, selectedMenu.jam_tutup)
+      return
     }
 
     // 2. Format description based on menu type
@@ -298,13 +304,32 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
     const { dateStr, timeStr } = getJakartaDateTime()
 
     for (const o of userOrders) {
-      if (o.kantin_menus?.jam_tutup && timeStr >= o.kantin_menus.jam_tutup.substring(0, 5)) {
-        showAlert({
-          title: "Batas Waktu Terlewat",
-          message: `Menu ${o.kantin_menus.nama} sudah melewati batas waktu pemesanan (${o.kantin_menus.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
-          type: "error"
-        })
-        return
+      if (o.menu_id) {
+        const liveMenu = menus.find(m => m.id === o.menu_id)
+        if (!liveMenu) {
+          showClosedMenuAlert(showAlert, o.kantin_menus?.nama || 'Menu', 'inactive')
+          return
+        }
+        if (liveMenu.is_habis) {
+          showAlert({ title: 'Menu Habis', message: `Menu ${liveMenu.nama} sedang habis hari ini.`, type: 'warning' })
+          return
+        }
+        const closedReason = getMenuClosedReason(liveMenu, timeStr)
+        if (closedReason) {
+          showClosedMenuAlert(showAlert, liveMenu.nama, closedReason, liveMenu.jam_tutup)
+          return
+        }
+      }
+      if (o.addon_id) {
+        const liveAddon = addons.find(a => a.id === o.addon_id)
+        if (!liveAddon || liveAddon.is_active === false) {
+          showClosedMenuAlert(showAlert, o.kantin_addons?.nama || 'Add-On', 'inactive')
+          return
+        }
+        if (liveAddon.is_habis) {
+          showAlert({ title: 'Add-On Habis', message: `Add-On ${liveAddon.nama} sedang habis hari ini.`, type: 'warning' })
+          return
+        }
       }
     }
 
@@ -446,7 +471,9 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
           <p className="text-sm text-slate-500">Tidak ada menu yang cocok.</p>
         ) : null}
 
-        {Object.entries(groupedMenus).map(([groupName, groupItems]) => (
+        {Object.entries(groupedMenus).map(([groupName, groupItems]) => {
+          const currentJakartaTime = getJakartaDateTime().timeStr
+          return (
           <div key={groupName} className="space-y-3 md:space-y-4">
             {/* Category Header */}
             <div className="flex items-center gap-3">
@@ -456,9 +483,16 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
               {groupItems.map((menu) => {
-                const isTutup = menu.is_active === false
+                const closedReason = getMenuClosedReason(menu, currentJakartaTime)
+                const isTutup = closedReason !== null
+                const isHabis = menu.is_habis === true
+                const isDisabled = isTutup || isHabis
                 return (
-        <Card key={menu.id} className={`overflow-hidden border-yellow-200 flex flex-col ${isTutup ? 'opacity-60 grayscale' : ''}`}>
+        <Card
+          key={menu.id}
+          className={`overflow-hidden border-yellow-200 flex flex-col ${isDisabled ? 'opacity-60 grayscale cursor-not-allowed' : ''}`}
+          onClick={isTutup && !isHabis ? () => showClosedMenuAlert(showAlert, menu.nama, closedReason!, menu.jam_tutup) : undefined}
+        >
           {menu.foto_url && (
             <div className="h-32 md:h-48 w-full bg-slate-100">
               <img src={menu.foto_url} alt={menu.nama} className="object-cover w-full h-full" />
@@ -468,8 +502,13 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
             <div className="flex justify-between items-start gap-2">
               <div className="min-w-0">
                 <div className="flex gap-1.5 items-center">
-                  <CardTitle className="text-sm md:text-base leading-tight truncate">{menu.nama}</CardTitle>
-                  {isTutup && <span className="bg-red-100 text-red-700 text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0">TUTUP</span>}
+                  <CardTitle className={`text-sm md:text-base leading-tight truncate ${isDisabled ? 'text-slate-500' : ''}`}>{menu.nama}</CardTitle>
+                  {isHabis && <span className="bg-slate-200 text-slate-700 text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0">HABIS</span>}
+                  {!isHabis && isTutup && (
+                    <span className="bg-red-100 text-red-700 text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0">
+                      {closedReason === 'cutoff' && menu.jam_tutup ? `TUTUP ${menu.jam_tutup.substring(0, 5)}` : 'TUTUP'}
+                    </span>
+                  )}
                 </div>
                 <CardDescription className="font-mono mt-0.5 text-yellow-600 font-bold text-xs">{menu.kode_unik}</CardDescription>
               </div>
@@ -483,8 +522,21 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
             )}
           </CardContent>
           <CardFooter className="px-3 py-2 md:px-6 md:py-4">
+            {isDisabled ? (
+              <Button
+                type="button"
+                disabled
+                className="w-full h-10 rounded-md text-sm font-semibold bg-slate-200 text-slate-500 cursor-not-allowed"
+              >
+                {isHabis
+                  ? 'Menu Sedang Habis'
+                  : closedReason === 'cutoff' && menu.jam_tutup
+                    ? `Tutup Jam ${menu.jam_tutup.substring(0, 5)}`
+                    : 'Menu Sedang Tutup'}
+              </Button>
+            ) : (
             <Dialog open={isOpen && selectedMenu?.id === menu.id} onOpenChange={(open) => {
-              if (open && !isTutup) {
+              if (open) {
                 setSelectedMenu(menu)
                 setCustomDesc('')
                 setWartegNasi('')
@@ -500,8 +552,8 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
                 setSelectedMenu(null)
               }
             }}>
-              <DialogTrigger className={`w-full text-white h-10 rounded-md text-sm font-semibold transition-colors ${isTutup ? 'bg-red-500 hover:bg-red-600' : 'bg-yellow-500 hover:bg-yellow-600'}`}>
-                {isTutup ? 'Pesan (Menu Sedang Tutup)' : 'Ingin Pesan'}
+              <DialogTrigger className="w-full text-white h-10 rounded-md text-sm font-semibold transition-colors bg-yellow-500 hover:bg-yellow-600">
+                Ingin Pesan
               </DialogTrigger>
               <DialogContent className="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
@@ -526,7 +578,7 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
                       size="sm" 
                       className="h-6 text-[10px] text-red-600 border-red-200 hover:bg-red-50"
                       onClick={() => {
-                        localStorage.removeItem('kantin_userName')
+                        clearUserSessionStorage()
                         window.location.href = '/login'
                       }}
                       type="button"
@@ -641,13 +693,15 @@ export default function MenuList({ menus, addons, profiles, orders }: { menus: a
                 </form>
               </DialogContent>
             </Dialog>
+            )}
           </CardFooter>
         </Card>
                 )
               })}
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

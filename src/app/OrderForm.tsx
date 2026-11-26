@@ -16,27 +16,26 @@ import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { id } from 'date-fns/locale'
 import { useAppDialog } from '@/components/AppDialogProvider'
-import { fetchLiveSaldoAndValidate, getJakartaDateTime, handleFailedSaldoCheck, handleOrderError, KantinProfile, OrderItemPayload, submitOrderBatch } from '@/lib/orderClient'
+import {
+  ComboOrderEntry,
+  LastMealSuggestion,
+  MenuClosedReason,
+  TopOrderCombo,
+  clearUserSessionStorage,
+  fetchLiveSaldoAndValidate,
+  fetchProfileOrderSuggestions,
+  findProfileFromSession,
+  getJakartaDateTime,
+  getMenuClosedReason,
+  handleFailedSaldoCheck,
+  handleOrderError,
+  isMenuClosed,
+  KantinProfile,
+  OrderItemPayload,
+  showClosedMenuAlert,
+  submitOrderBatch,
+} from '@/lib/orderClient'
 import { getJakartaWelcomeGreeting, DailyGreetingData } from '@/lib/greetings'
-
-interface ComboOrderEntry {
-  menu_id: string | null
-  addon_id: string | null
-  note: string
-  addonNote: string
-  nama: string
-  snapshotHarga: number
-}
-
-interface TopOrderCombo {
-  signature: string
-  count: number
-  lastDate: string
-  items: ComboOrderEntry[]
-  totalLivePrice: number
-  hasSoldOut: boolean
-  hasClosed: boolean
-}
 
 export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
   const { showAlert, showConfirm } = useAppDialog()
@@ -60,22 +59,18 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     
     // Check if missing or expired (1 hour = 3600000 ms)
     if (!savedName || !loginTime || (Date.now() - parseInt(loginTime)) > 3600000) {
-      localStorage.removeItem('kantin_userName')
-      localStorage.removeItem('kantin_loginTime')
-      localStorage.removeItem('kantin_profile_id')
+      clearUserSessionStorage()
       window.location.href = '/login'
       return
     }
     
-    // Auto find active profile by name
-    const profile = profiles.find(p => p.nama?.toLowerCase() === savedName.toLowerCase())
-    if (profile) {
+    // Prefer profile_id lookup to avoid name collisions, fallback to nama
+    const profile = findProfileFromSession(profiles)
+    if (profile && profile.status !== 'inactive') {
       setActiveProfile(profile)
       setAuthChecking(false)
     } else {
-      localStorage.removeItem('kantin_userName')
-      localStorage.removeItem('kantin_loginTime')
-      localStorage.removeItem('kantin_profile_id')
+      clearUserSessionStorage()
       window.location.href = '/login'
     }
   }, [profiles])
@@ -88,7 +83,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   const [itemNotes, setItemNotes] = useState<Record<string, string>>({}) // Per-item notes
   
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [lastMeal, setLastMeal] = useState<{ date: string, items: any[] } | null>(null)
+  const [lastMeal, setLastMeal] = useState<LastMealSuggestion | null>(null)
   const [topCombos, setTopCombos] = useState<TopOrderCombo[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [welcomeData, setWelcomeData] = useState<DailyGreetingData>(() => getJakartaWelcomeGreeting(0))
@@ -107,159 +102,37 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   useEffect(() => {
     if (!activeProfile?.id) return
 
-    const fetchOrderSuggestions = async () => {
-      const { data: pastOrders } = await supabase
-        .from('kantin_orders')
-        .select(`
-          id, tanggal, created_at, menu_id, addon_id,
-          deskripsi_pesanan, deskripsi_addon, harga, harga_addon, status,
-          kantin_menus(nama, harga, is_active, is_habis, jam_tutup),
-          kantin_addons(nama, harga, is_habis)
-        `)
-        .eq('profile_id', activeProfile.id)
-        .neq('status', 'dibatalkan')
-        .lt('tanggal', todayStr)
-        .order('tanggal', { ascending: false })
-        .order('created_at', { ascending: true })
-        .limit(300)
+    const loadSuggestions = async () => {
+      const { lastMeal: last, topCombos: combos } = await fetchProfileOrderSuggestions(
+        activeProfile.id,
+        menus,
+        addons,
+        todayStr
+      )
+      setLastMeal(last)
+      setTopCombos(combos)
 
-      if (!pastOrders || pastOrders.length === 0) return
-
-      // A. Pesanan Terakhir (tanggal paling baru sebelum hari ini)
-      const lastDate = pastOrders[0].tanggal
-      const lastMealItems = pastOrders.filter(o => o.tanggal === lastDate)
-      if (lastMealItems.length > 0) {
-        setLastMeal({ date: lastDate, items: lastMealItems })
-      }
-
-      // B. Top 5 kombinasi pesanan yang paling sering dibeli (dikelompokkan per tanggal)
-      const ordersByDate = new Map<string, typeof pastOrders>()
-      for (const row of pastOrders) {
-        const key = row.tanggal
-        if (!ordersByDate.has(key)) ordersByDate.set(key, [])
-        ordersByDate.get(key)!.push(row)
-      }
-
-      const comboMap = new Map<string, {
-        count: number
-        lastDate: string
-        entries: ComboOrderEntry[]
-      }>()
-
-      for (const [dateKey, rows] of ordersByDate.entries()) {
-        const entries: ComboOrderEntry[] = []
-        for (const r of rows) {
-          const menuRel = Array.isArray(r.kantin_menus) ? r.kantin_menus[0] : r.kantin_menus
-          const addonRel = Array.isArray(r.kantin_addons) ? r.kantin_addons[0] : r.kantin_addons
-          if (r.menu_id) {
-            entries.push({
-              menu_id: r.menu_id,
-              addon_id: null,
-              note: (r.deskripsi_pesanan || '').trim(),
-              addonNote: '',
-              nama: menuRel?.nama || 'Menu',
-              snapshotHarga: r.harga || 0,
-            })
-          }
-          if (r.addon_id) {
-            entries.push({
-              menu_id: null,
-              addon_id: r.addon_id,
-              note: '',
-              addonNote: (r.deskripsi_addon || '').trim(),
-              nama: addonRel?.nama || 'Add-On',
-              snapshotHarga: r.addon_id && r.menu_id ? (r.harga_addon || 0) : (r.harga || r.harga_addon || 0),
-            })
-          }
+      if (last || combos.length > 0) {
+        const loginKey = localStorage.getItem('kantin_loginTime') || 'session'
+        const seenKey = `kantin_suggestion_seen_${loginKey}`
+        if (!sessionStorage.getItem(seenKey)) {
+          sessionStorage.setItem(seenKey, '1')
+          setShowSuggestions(true)
         }
-        if (entries.length === 0) continue
-
-        const signature = entries
-          .map(e => (e.menu_id ? `m:${e.menu_id}:${e.note.toLowerCase()}` : `a:${e.addon_id}:${e.addonNote.toLowerCase()}`))
-          .sort()
-          .join('|')
-
-        const existing = comboMap.get(signature)
-        if (existing) {
-          existing.count += 1
-          if (dateKey > existing.lastDate) existing.lastDate = dateKey
-        } else {
-          comboMap.set(signature, {
-            count: 1,
-            lastDate: dateKey,
-            entries,
-          })
-        }
-      }
-
-      const jakartaNow = getJakartaDateTime().timeStr
-      const rankedCombos: TopOrderCombo[] = Array.from(comboMap.entries())
-        .sort((a, b) => {
-          if (b[1].count !== a[1].count) return b[1].count - a[1].count
-          return b[1].lastDate.localeCompare(a[1].lastDate)
-        })
-        .slice(0, 5)
-        .map(([signature, data]) => {
-          let totalLivePrice = 0
-          let hasSoldOut = false
-          let hasClosed = false
-          for (const entry of data.entries) {
-            if (entry.menu_id) {
-              const liveMenu = menus.find(m => m.id === entry.menu_id)
-              if (liveMenu) {
-                totalLivePrice += liveMenu.harga || 0
-                if (liveMenu.is_habis) hasSoldOut = true
-                if (liveMenu.is_active === false || (liveMenu.jam_tutup && jakartaNow >= liveMenu.jam_tutup.substring(0, 5))) {
-                  hasClosed = true
-                }
-              } else {
-                totalLivePrice += entry.snapshotHarga
-              }
-            } else if (entry.addon_id) {
-              const liveAddon = addons.find(a => a.id === entry.addon_id)
-              if (liveAddon) {
-                totalLivePrice += liveAddon.harga || 0
-                if (liveAddon.is_habis) hasSoldOut = true
-              } else {
-                totalLivePrice += entry.snapshotHarga
-              }
-            }
-          }
-          return {
-            signature,
-            count: data.count,
-            lastDate: data.lastDate,
-            items: data.entries,
-            totalLivePrice,
-            hasSoldOut,
-            hasClosed,
-          }
-        })
-
-      setTopCombos(rankedCombos)
-
-      // Tampilkan modal saran awal sekali saat login / buka halaman
-      const loginKey = localStorage.getItem('kantin_loginTime') || 'session'
-      const seenKey = `kantin_suggestion_seen_${loginKey}`
-      if (!sessionStorage.getItem(seenKey)) {
-        sessionStorage.setItem(seenKey, '1')
-        setShowSuggestions(true)
       }
     }
 
-    fetchOrderSuggestions()
+    loadSuggestions()
   }, [activeProfile?.id, menus, addons, todayStr])
 
-  // Addon categories extraction
+  // Active addons & categories extraction
+  const activeAddons = useMemo(() => addons.filter(a => a.is_active !== false), [addons])
+
   const addonCategories = useMemo(() => {
     const cats = new Set<string>()
-    addons.forEach(a => cats.add(a.kategori || 'Lainnya'))
+    activeAddons.forEach(a => cats.add(a.kategori || 'Lainnya'))
     return Array.from(cats).sort()
-  }, [addons])
-
-  const isMenuClosed = (menu: { is_active?: boolean | null; jam_tutup?: string | null }, timeStr: string) => {
-    return menu.is_active === false || (!!menu.jam_tutup && timeStr >= menu.jam_tutup.substring(0, 5))
-  }
+  }, [activeAddons])
 
   // Groups extraction with open/closed status (sorted: Open A-Z first, Closed A-Z after)
   const menuGroupsInfo = useMemo(() => {
@@ -308,16 +181,18 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     return total
   }, [checkedItems, menus, addons])
 
-  const toggleItem = async (itemId: string, isHabis: boolean, isTutup: boolean) => {
+  const toggleItem = (
+    itemId: string,
+    isHabis: boolean,
+    closedReason: MenuClosedReason,
+    itemName: string,
+    jamTutup?: string | null
+  ) => {
     if (isHabis) return // Cannot select sold out items
-    
-    if (isTutup) {
-      const proceed = await showConfirm({
-        title: "Menu Ditutup",
-        message: "Item ini sedang ditandai TUTUP oleh Admin. Yakin ingin memesannya?",
-        confirmText: "Paksakan Pesan"
-      })
-      if (!proceed) return
+
+    if (closedReason) {
+      showClosedMenuAlert(showAlert, itemName, closedReason, jamTutup)
+      return
     }
 
     setCheckedItems(prev => 
@@ -345,13 +220,27 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
     for (const itemId of checkedItems) {
       const isMenu = menus.find(x => x.id === itemId)
-      if (isMenu && isMenu.jam_tutup && jakartaTimeStr >= isMenu.jam_tutup.substring(0, 5)) {
-        showAlert({
-          title: "Batas Waktu Terlewat",
-          message: `Menu ${isMenu.nama} sudah melewati batas waktu pemesanan (${isMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
-          type: "error"
-        })
-        return
+      if (isMenu) {
+        if (isMenu.is_habis) {
+          showAlert({ title: 'Menu Habis', message: `Menu ${isMenu.nama} sedang habis hari ini.`, type: 'warning' })
+          return
+        }
+        const closedReason = getMenuClosedReason(isMenu, jakartaTimeStr)
+        if (closedReason) {
+          showClosedMenuAlert(showAlert, isMenu.nama, closedReason, isMenu.jam_tutup)
+          return
+        }
+      }
+      const isAddon = addons.find(x => x.id === itemId)
+      if (isAddon) {
+        if (isAddon.is_habis) {
+          showAlert({ title: 'Add-On Habis', message: `Add-On ${isAddon.nama} sedang habis hari ini.`, type: 'warning' })
+          return
+        }
+        if (isAddon.is_active === false) {
+          showClosedMenuAlert(showAlert, isAddon.nama, 'inactive')
+          return
+        }
       }
     }
 
@@ -411,7 +300,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       if (orderIds.length > 0) {
         const { data: fetchedOrders, error: fetchErr } = await supabase
           .from('kantin_orders')
-          .select(`*, kantin_profiles(nama, saldo), kantin_menus(nama, kode_unik), kantin_addons(nama)`)
+          .select(`*, kantin_profiles(nama, saldo), kantin_menus(nama, kode_unik, jam_tutup), kantin_addons(nama)`)
           .in('id', orderIds)
 
         if (!fetchErr && fetchedOrders) {
@@ -452,12 +341,15 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
     const { dateStr, timeStr: jakartaTimeStr } = getJakartaDateTime()
 
-    // Cek jam tutup & item habis secara live dari master menus/addons
+    // Cek status tutup, jam tutup & item habis secara live dari master menus/addons
     const availableEntries: { entry: ComboOrderEntry; liveMenu?: any; liveAddon?: any }[] = []
     for (const entry of entries) {
       if (entry.menu_id) {
         const liveMenu = menus.find(m => m.id === entry.menu_id)
-        if (!liveMenu) continue
+        if (!liveMenu) {
+          showClosedMenuAlert(showAlert, entry.nama, 'inactive')
+          return
+        }
         if (liveMenu.is_habis) {
           showAlert({
             title: 'Menu Habis',
@@ -466,18 +358,18 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           })
           return
         }
-        if (liveMenu.jam_tutup && jakartaTimeStr >= liveMenu.jam_tutup.substring(0, 5)) {
-          showAlert({
-            title: 'Batas Waktu Terlewat',
-            message: `Menu ${liveMenu.nama} sudah melewati batas waktu pemesanan (${liveMenu.jam_tutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung.`,
-            type: 'error',
-          })
+        const closedReason = getMenuClosedReason(liveMenu, jakartaTimeStr)
+        if (closedReason) {
+          showClosedMenuAlert(showAlert, liveMenu.nama, closedReason, liveMenu.jam_tutup)
           return
         }
         availableEntries.push({ entry, liveMenu })
       } else if (entry.addon_id) {
         const liveAddon = addons.find(a => a.id === entry.addon_id)
-        if (!liveAddon) continue
+        if (!liveAddon || liveAddon.is_active === false) {
+          showClosedMenuAlert(showAlert, liveAddon?.nama || entry.nama, 'inactive')
+          return
+        }
         if (liveAddon.is_habis) {
           showAlert({
             title: 'Add-On Habis',
@@ -520,15 +412,6 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     try {
       const payloads: OrderItemPayload[] = []
       for (const { entry, liveMenu, liveAddon } of availableEntries) {
-        if (liveMenu?.is_active === false) {
-          const force = await showConfirm({
-            title: 'Menu Ditutup',
-            message: `Peringatan: Menu ${liveMenu.nama} sedang ditandai TUTUP. Lanjutkan pesan ini?`,
-            confirmText: 'Paksakan Pesan',
-          })
-          if (!force) continue
-        }
-
         const isMenu = !!liveMenu
         const note = isMenu ? entry.note : entry.addonNote
         const price = (isMenu ? liveMenu.harga : liveAddon?.harga) || 0
@@ -589,32 +472,9 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   }
 
   const handleReorder = async () => {
-    if (!lastMeal || lastMeal.items.length === 0) return
-    const entries: ComboOrderEntry[] = []
-    for (const r of lastMeal.items) {
-      if (r.menu_id) {
-        entries.push({
-          menu_id: r.menu_id,
-          addon_id: null,
-          note: (r.deskripsi_pesanan || '').trim(),
-          addonNote: '',
-          nama: r.kantin_menus?.nama || 'Menu',
-          snapshotHarga: r.harga || 0,
-        })
-      }
-      if (r.addon_id) {
-        entries.push({
-          menu_id: null,
-          addon_id: r.addon_id,
-          note: '',
-          addonNote: (r.deskripsi_addon || '').trim(),
-          nama: r.kantin_addons?.nama || 'Add-On',
-          snapshotHarga: r.harga_addon || r.harga || 0,
-        })
-      }
-    }
+    if (!lastMeal || lastMeal.entries.length === 0) return
     await reorderEntries(
-      entries,
+      lastMeal.entries,
       'Ulangi Pesanan Terakhir',
       `Apakah Anda ingin memesan ulang pesanan terakhir Anda (${lastMeal.date})?`
     )
@@ -858,8 +718,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                 size="sm" 
                 className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 text-[11px] h-7 px-2.5 font-bold rounded-lg"
                 onClick={() => {
-                  localStorage.removeItem('kantin_userName')
-                  localStorage.removeItem('kantin_loginTime')
+                  clearUserSessionStorage()
                   window.location.href = '/login'
                 }}
               >
@@ -980,7 +839,9 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                   {currentGroupMenus.map(menu => {
                     // @ts-ignore
                     const isHabis = menu.is_habis === true
-                    const isTutup = isMenuClosed(menu, currentJakartaTime)
+                    const closedReason = getMenuClosedReason(menu, currentJakartaTime)
+                    const isTutup = closedReason !== null
+                    const isLocked = isHabis || isTutup
                     const isChecked = checkedItems.includes(menu.id)
                     
                     return (
@@ -989,19 +850,21 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                         className={`rounded-xl border p-3.5 transition-all ${
                           isChecked
                             ? 'border-amber-400 bg-amber-50/70 ring-1 ring-amber-300/60 shadow-xs'
-                            : 'border-amber-100 bg-white hover:border-amber-300 hover:bg-amber-50/20'
+                            : isLocked
+                              ? 'border-slate-200 bg-slate-50/70'
+                              : 'border-amber-100 bg-white hover:border-amber-300 hover:bg-amber-50/20'
                         }`}
                       >
                         <div 
-                          className={`flex items-center gap-3 ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
-                          onClick={() => toggleItem(menu.id, isHabis, isTutup)}
+                          className={`flex items-center gap-3 ${isLocked ? 'opacity-55 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+                          onClick={() => toggleItem(menu.id, isHabis, closedReason, menu.nama, menu.jam_tutup)}
                         >
                           <Checkbox 
                             checked={isChecked} 
-                            className={`h-5 w-5 border-amber-400 data-[state=checked]:bg-amber-500 ${isHabis ? 'opacity-50' : ''} shrink-0`}
-                            onCheckedChange={() => toggleItem(menu.id, isHabis, isTutup)}
+                            className={`h-5 w-5 border-amber-400 data-[state=checked]:bg-amber-500 ${isLocked ? 'opacity-50 pointer-events-none' : ''} shrink-0`}
+                            onCheckedChange={() => toggleItem(menu.id, isHabis, closedReason, menu.nama, menu.jam_tutup)}
                             onClick={e => e.stopPropagation()}
-                            disabled={isHabis}
+                            disabled={isLocked}
                           />
                           
                           {menu.foto_url ? (
@@ -1014,11 +877,15 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
 
                           <div className="flex-1 min-w-0 space-y-1">
                             <div className="flex items-start justify-between gap-1.5">
-                              <p className={`font-bold text-xs md:text-sm leading-snug line-clamp-2 ${isHabis ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+                              <p className={`font-bold text-xs md:text-sm leading-snug line-clamp-2 ${isLocked ? 'line-through text-slate-500' : 'text-slate-800'}`}>
                                 {menu.nama}
                               </p>
                               {isHabis && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Habis</span>}
-                              {isTutup && !isHabis && <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Tutup</span>}
+                              {isTutup && !isHabis && (
+                                <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">
+                                  {closedReason === 'cutoff' && menu.jam_tutup ? `Tutup ${menu.jam_tutup.substring(0, 5)}` : 'Tutup'}
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs md:text-sm text-amber-700 font-black">Rp {menu.harga.toLocaleString('id-ID')}</p>
                           </div>
@@ -1051,11 +918,11 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
               Add-On: {selectedAddonCategory}
             </div>
             <div className="p-3.5 md:p-4">
-              {addons.filter(a => a.kategori === selectedAddonCategory).length === 0 ? (
+              {activeAddons.filter(a => (a.kategori || 'Lainnya') === selectedAddonCategory).length === 0 ? (
                 <p className="p-6 text-center text-xs text-slate-500">Tidak ada add-on.</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  {addons.filter(a => a.kategori === selectedAddonCategory).map(addon => {
+                  {activeAddons.filter(a => (a.kategori || 'Lainnya') === selectedAddonCategory).map(addon => {
                     // @ts-ignore
                     const isHabis = addon.is_habis === true
                     const isChecked = checkedItems.includes(addon.id)
@@ -1071,12 +938,12 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                       >
                         <div 
                           className={`flex items-center gap-3 ${isHabis ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
-                          onClick={() => toggleItem(addon.id, isHabis, false)}
+                          onClick={() => toggleItem(addon.id, isHabis, null, addon.nama)}
                         >
                           <Checkbox 
                             checked={isChecked} 
-                            className={`h-5 w-5 border-amber-400 data-[state=checked]:bg-amber-500 ${isHabis ? 'opacity-50' : ''} shrink-0`}
-                            onCheckedChange={() => toggleItem(addon.id, isHabis, false)}
+                            className={`h-5 w-5 border-amber-400 data-[state=checked]:bg-amber-500 ${isHabis ? 'opacity-50 pointer-events-none' : ''} shrink-0`}
+                            onCheckedChange={() => toggleItem(addon.id, isHabis, null, addon.nama)}
                             onClick={e => e.stopPropagation()}
                             disabled={isHabis}
                           />
@@ -1293,11 +1160,21 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
             {lastMeal && lastMeal.items.length > 0 && (
               <div className="rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-yellow-50/60 to-white p-3.5 sm:p-4 space-y-2.5 shadow-xs">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 uppercase tracking-wide">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 uppercase tracking-wide flex-wrap">
                     <Clock className="h-3.5 w-3.5 text-amber-600" />
                     <span>A. Pesanan Terakhir</span>
+                    {lastMeal.hasSoldOut && (
+                      <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded normal-case">
+                        Ada item habis
+                      </span>
+                    )}
+                    {lastMeal.hasClosed && !lastMeal.hasSoldOut && (
+                      <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded normal-case">
+                        Ada menu tutup
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[11px] font-semibold text-amber-700 bg-white border border-amber-200 px-2 py-0.5 rounded-full">
+                  <span className="text-[11px] font-semibold text-amber-700 bg-white border border-amber-200 px-2 py-0.5 rounded-full shrink-0">
                     {lastMeal.date}
                   </span>
                 </div>
