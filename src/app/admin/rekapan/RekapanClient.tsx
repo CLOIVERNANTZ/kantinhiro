@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo, useRef } from 'react'
+import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table'
@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { supabase } from '@/lib/supabase'
-import { AlertCircle, ArrowLeft, Clock, Copy, Image as ImageIcon, RotateCcw, ShoppingBag, Sparkles } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Clock, Copy, Image as ImageIcon, Lock, RotateCcw, ShoppingBag, Sparkles, Unlock } from 'lucide-react'
 
 // Sub-component for formatted editable price
 const PriceCell = ({ initialValue, onSave, isChecked }: { initialValue: number, onSave: (val: number) => void, isChecked: boolean }) => {
@@ -75,7 +75,9 @@ import {
   TopOrderCombo,
   fetchLiveSaldoAndValidate,
   fetchProfileOrderSuggestions,
+  formatCountdown,
   getJakartaDateTime,
+  getLatePermitRemainingSeconds,
   submitOrderBatch,
 } from '@/lib/orderClient'
 
@@ -84,11 +86,93 @@ const getTokoName = (order: { kantin_menus?: { kode_unik?: string | null } | nul
   return code.includes('-') ? code.split('-')[0] : code
 }
 
-export default function RekapanClient({ initialOrders, initialDate, profiles, menus, addons }: { initialOrders: any[], initialDate?: string, profiles?: any[], menus?: any[], addons?: any[] }) {
+export default function RekapanClient({
+  initialOrders,
+  initialDate,
+  profiles,
+  menus,
+  addons,
+  initialLateFeatureEnabled = true,
+}: {
+  initialOrders: any[]
+  initialDate?: string
+  profiles?: any[]
+  menus?: any[]
+  addons?: any[]
+  initialLateFeatureEnabled?: boolean
+}) {
   const router = useRouter()
   const { showAlert, showConfirm } = useAppDialog()
   const [orders, setOrders] = useState(initialOrders)
   const [selectedDate, setSelectedDate] = useState(() => initialDate || getJakartaDateTime().dateStr)
+  const [lateFeatureEnabled, setLateFeatureEnabled] = useState(initialLateFeatureEnabled)
+  const [lateModalOpen, setLateModalOpen] = useState(false)
+  const [lateSearch, setLateSearch] = useState('')
+  const [lateActionLoadingId, setLateActionLoadingId] = useState<string | null>(null)
+  const [lateToggleLoading, setLateToggleLoading] = useState(false)
+  const [lateNowMs, setLateNowMs] = useState<number>(0)
+  const [lateAccessMap, setLateAccessMap] = useState<Record<string, string | null>>(() => {
+    const map: Record<string, string | null> = {}
+    for (const p of profiles || []) {
+      map[p.id] = p.late_access_until || null
+    }
+    return map
+  })
+  const [lateGraceMap, setLateGraceMap] = useState<Record<string, boolean>>(() => {
+    const map: Record<string, boolean> = {}
+    for (const p of profiles || []) {
+      map[p.id] = Boolean(p.late_grace_locked)
+    }
+    return map
+  })
+  const [lateLogs, setLateLogs] = useState<{ profile_id: string; used_at: string | null; tanggal: string }[]>([])
+
+  const fetchLateLogs = async () => {
+    const { dateStr } = getJakartaDateTime()
+    const monthStartStr = `${dateStr.slice(0, 7)}-01`
+    const { data, error } = await supabase
+      .from('kantin_late_logs')
+      .select('profile_id, used_at, tanggal')
+      .gte('tanggal', monthStartStr)
+
+    if (!error && data) {
+      setLateLogs(data)
+    }
+  }
+
+  useEffect(() => {
+    const startTimer = setTimeout(() => {
+      setLateNowMs(Date.now())
+      fetchLateLogs()
+    }, 0)
+    const interval = setInterval(() => setLateNowMs(Date.now()), 1000)
+
+    const profileChannel = supabase
+      .channel('admin_late_permit_profiles')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'kantin_profiles' },
+        (payload) => {
+          const updated = payload.new as { id?: string; late_access_until?: string | null; late_grace_locked?: boolean | null; saldo?: number } | null
+          if (updated?.id) {
+            const uid = updated.id
+            if (updated.late_access_until !== undefined) {
+              setLateAccessMap(prev => ({ ...prev, [uid]: updated.late_access_until ?? null }))
+            }
+            if (typeof updated.late_grace_locked === 'boolean') {
+              setLateGraceMap(prev => ({ ...prev, [uid]: Boolean(updated.late_grace_locked) }))
+            }
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      clearTimeout(startTimer)
+      clearInterval(interval)
+      supabase.removeChannel(profileChannel)
+    }
+  }, [])
 
   const handleDateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDate = e.target.value
@@ -600,6 +684,130 @@ export default function RekapanClient({ initialOrders, initialDate, profiles, me
   const currentJakartaTime = getJakartaDateTime().timeStr
   const estimatedRemainingSaldo = manualLiveSaldo !== null ? manualLiveSaldo - manualTotalPrice : null
 
+  // Hitung frekuensi izin telat yang benar-benar terpakai (used_at != null) minggu ini & bulan ini
+  const lateFreqByProfile = useMemo(() => {
+    const todayStr = getJakartaDateTime().dateStr
+    const monthPrefix = todayStr.slice(0, 7)
+    const [y, m, d] = todayStr.split('-').map(Number)
+    const mondayDate = new Date(Date.UTC(y, (m || 1) - 1, d || 1))
+    const dow = mondayDate.getUTCDay()
+    mondayDate.setUTCDate(mondayDate.getUTCDate() - (dow === 0 ? 6 : dow - 1))
+    const weekStartStr = mondayDate.toISOString().slice(0, 10)
+
+    const map: Record<string, { weekUsed: number; monthUsed: number }> = {}
+    for (const log of lateLogs) {
+      if (!log.used_at) continue
+      if (!map[log.profile_id]) map[log.profile_id] = { weekUsed: 0, monthUsed: 0 }
+      if (log.tanggal >= weekStartStr) map[log.profile_id].weekUsed += 1
+      if (log.tanggal.startsWith(monthPrefix)) map[log.profile_id].monthUsed += 1
+    }
+    return map
+  }, [lateLogs])
+
+  const activePermitProfiles = useMemo(() => {
+    if (!lateFeatureEnabled || lateNowMs === 0) return []
+    return activeProfiles
+      .map(p => ({
+        profile: p,
+        remainingSec: getLatePermitRemainingSeconds(lateAccessMap[p.id], lateNowMs),
+      }))
+      .filter(x => x.remainingSec > 0)
+  }, [activeProfiles, lateAccessMap, lateNowMs, lateFeatureEnabled])
+
+  const filteredLateProfiles = useMemo(() => {
+    const q = lateSearch.trim().toLowerCase()
+    const list = q
+      ? activeProfiles.filter(
+          p =>
+            p.nama?.toLowerCase().includes(q) ||
+            (p.divisi || '').toLowerCase().includes(q)
+        )
+      : activeProfiles
+
+    // Prioritaskan user yang izinnya sedang aktif di paling atas
+    return [...list].sort((a, b) => {
+      const remA = lateNowMs > 0 ? getLatePermitRemainingSeconds(lateAccessMap[a.id], lateNowMs) : 0
+      const remB = lateNowMs > 0 ? getLatePermitRemainingSeconds(lateAccessMap[b.id], lateNowMs) : 0
+      if ((remA > 0) !== (remB > 0)) return remA > 0 ? -1 : 1
+      return (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' })
+    })
+  }, [activeProfiles, lateSearch, lateAccessMap, lateNowMs])
+
+  const handleToggleLateFeature = async () => {
+    if (lateToggleLoading) return
+    const nextEnabled = !lateFeatureEnabled
+    const proceed = await showConfirm({
+      title: nextEnabled ? 'Aktifkan Layanan Izin Telat?' : 'Nonaktifkan Layanan Izin Telat?',
+      message: nextEnabled
+        ? 'Jika diaktifkan, user yang telat dapat mengirim alasan darurat via WA dan Admin dapat memberi izin checkout 15 menit (1x pakai).'
+        : 'Jika dinonaktifkan, user tidak akan melihat opsi minta izin WA dan seluruh izin 15 menit yang sedang aktif akan dicabut.',
+      confirmText: nextEnabled ? 'Ya, Aktifkan' : 'Ya, Nonaktifkan',
+      variant: nextEnabled ? 'default' : 'destructive',
+    })
+    if (!proceed) return
+
+    setLateToggleLoading(true)
+    try {
+      const { error } = await supabase.rpc('toggle_late_order_feature', { p_enabled: nextEnabled })
+      if (error) throw error
+      setLateFeatureEnabled(nextEnabled)
+      if (!nextEnabled) {
+        setLateAccessMap({})
+        setLateGraceMap({})
+      }
+      router.refresh()
+    } catch (err: any) {
+      showAlert({
+        title: 'Gagal Mengubah Pengaturan',
+        message: (err?.message || 'Error') + '\n\nPastikan skrip SQL izin telat sudah dijalankan di Supabase.',
+        type: 'error',
+      })
+    } finally {
+      setLateToggleLoading(false)
+    }
+  }
+
+  const handleGrantLatePermit = async (profileId: string) => {
+    if (lateActionLoadingId || !lateFeatureEnabled) return
+    setLateActionLoadingId(profileId)
+    try {
+      const { data: expiresAt, error } = await supabase.rpc('grant_late_permission', { p_profile_id: profileId })
+      if (error) throw error
+      if (expiresAt) {
+        setLateAccessMap(prev => ({ ...prev, [profileId]: expiresAt as string }))
+        setLateGraceMap(prev => ({ ...prev, [profileId]: false }))
+      }
+      await fetchLateLogs()
+    } catch (err: any) {
+      showAlert({
+        title: 'Gagal Memberi Izin',
+        message: (err?.message || 'Error') + '\n\nPastikan skrip SQL izin telat sudah dijalankan di Supabase.',
+        type: 'error',
+      })
+    } finally {
+      setLateActionLoadingId(null)
+    }
+  }
+
+  const handleRevokeLatePermit = async (profileId: string) => {
+    if (lateActionLoadingId) return
+    setLateActionLoadingId(profileId)
+    try {
+      const { error } = await supabase.rpc('revoke_late_permission', { p_profile_id: profileId })
+      if (error) throw error
+      setLateAccessMap(prev => ({ ...prev, [profileId]: null }))
+      setLateGraceMap(prev => ({ ...prev, [profileId]: false }))
+    } catch (err: any) {
+      showAlert({
+        title: 'Gagal Mencabut Izin',
+        message: err?.message || 'Error',
+        type: 'error',
+      })
+    } finally {
+      setLateActionLoadingId(null)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-2">
@@ -612,7 +820,207 @@ export default function RekapanClient({ initialOrders, initialDate, profiles, me
             className="h-9 font-bold text-yellow-800 bg-yellow-50 border-yellow-200"
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setLateModalOpen(true)
+              fetchLateLogs()
+            }}
+            className={`font-bold h-10 border ${
+              !lateFeatureEnabled
+                ? 'border-slate-300 text-slate-500 bg-slate-50 hover:bg-slate-100'
+                : activePermitProfiles.length > 0
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  : 'border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
+            }`}
+          >
+            {lateFeatureEnabled ? <Unlock className="h-4 w-4 mr-1.5" /> : <Lock className="h-4 w-4 mr-1.5" />}
+            {!lateFeatureEnabled
+              ? 'Izin Telat (Off)'
+              : activePermitProfiles.length > 0
+                ? `Izin Telat (${activePermitProfiles.length})`
+                : 'Izin Telat'}
+          </Button>
+
+          <Dialog open={lateModalOpen} onOpenChange={setLateModalOpen}>
+            <DialogContent className="sm:max-w-xl w-[95vw] max-h-[90vh] overflow-y-auto rounded-2xl border-2 border-amber-200 bg-white p-4 sm:p-6">
+              <DialogHeader>
+                <DialogTitle className="text-base sm:text-lg font-black text-amber-950">
+                  Izin Pesan Telat (15 Menit + 3 Menit Revisi)
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500">
+                  Centang nama user yang diizinkan pesan lewat jam tutup. Setelah pesan, user diberi 3 menit revisi jika ingin hapus &amp; ganti (terkunci jika sudah dicentang Admin).
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 mt-2">
+                {/* Master Toggle ON / OFF Layanan */}
+                <div className={`rounded-xl border p-3.5 flex flex-wrap items-center justify-between gap-3 ${lateFeatureEnabled ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                        Status Layanan Izin Telat
+                      </span>
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${lateFeatureEnabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
+                        {lateFeatureEnabled ? 'AKTIF' : 'NONAKTIF'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600">
+                      {lateFeatureEnabled
+                        ? 'User dapat melihat opsi darurat WA ke Mas Yana dan memakai izin 15 menit.'
+                        : 'Fitur dimatikan — tidak ada opsi minta izin WA dan semua batas jam tutup terkunci penuh.'}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={lateToggleLoading}
+                    variant={lateFeatureEnabled ? 'outline' : 'default'}
+                    onClick={handleToggleLateFeature}
+                    className={
+                      lateFeatureEnabled
+                        ? 'border-red-300 text-red-700 hover:bg-red-50 font-bold text-xs h-8'
+                        : 'bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs h-8'
+                    }
+                  >
+                    {lateToggleLoading ? 'Menyimpan...' : lateFeatureEnabled ? 'Nonaktifkan Layanan' : 'Aktifkan Layanan'}
+                  </Button>
+                </div>
+
+                {lateFeatureEnabled && (
+                  <>
+                    {/* Izin Sedang Berjalan */}
+                    {activePermitProfiles.length > 0 && (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
+                        <p className="text-[11px] font-black text-emerald-900 uppercase tracking-wide">
+                          Sedang Aktif ({activePermitProfiles.length})
+                        </p>
+                        <div className="space-y-1.5">
+                          {activePermitProfiles.map(({ profile, remainingSec }) => {
+                            const isRevision = Boolean(lateGraceMap[profile.id])
+                            return (
+                              <div key={profile.id} className="flex items-center justify-between gap-2 bg-white border border-emerald-200 rounded-lg px-3 py-2 text-xs">
+                                <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-slate-800">{profile.nama}</span>
+                                  {profile.divisi && <span className="text-slate-400">({profile.divisi})</span>}
+                                  {isRevision && (
+                                    <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                                      Revisi 3m
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className={`font-black tabular-nums px-2 py-0.5 rounded-full border ${isRevision ? 'text-amber-800 bg-amber-50 border-amber-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200'}`}>
+                                    ⏳ {formatCountdown(remainingSec)}
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={lateActionLoadingId === profile.id}
+                                    onClick={() => handleRevokeLatePermit(profile.id)}
+                                    className="h-7 text-[11px] px-2 border-red-200 text-red-600 hover:bg-red-50 font-bold"
+                                  >
+                                    Cabut
+                                  </Button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Search & Daftar Ceklis + Catatan Frekuensi */}
+                    <div className="space-y-2.5">
+                      <Input
+                        placeholder="Cari nama atau divisi..."
+                        value={lateSearch}
+                        onChange={(e) => setLateSearch(e.target.value)}
+                        className="h-9 text-xs border-amber-200 bg-white"
+                      />
+
+                      <div className="border border-amber-200 rounded-xl divide-y divide-amber-100 max-h-[340px] overflow-y-auto bg-white">
+                        {filteredLateProfiles.length === 0 ? (
+                          <p className="py-6 text-center text-xs text-slate-400">Tidak ada user cocok.</p>
+                        ) : (
+                          filteredLateProfiles.map(p => {
+                            const remSec = lateNowMs > 0 ? getLatePermitRemainingSeconds(lateAccessMap[p.id], lateNowMs) : 0
+                            const isPermitted = remSec > 0
+                            const freq = lateFreqByProfile[p.id] || { weekUsed: 0, monthUsed: 0 }
+                            const userSaldo = profileSaldoMap[p.id] ?? p.saldo ?? 0
+                            const isFrequent = freq.weekUsed >= 2 || freq.monthUsed >= 3
+
+                            return (
+                              <div
+                                key={p.id}
+                                className={`px-3 py-2.5 flex items-center justify-between gap-2.5 ${isPermitted ? 'bg-emerald-50/40' : 'hover:bg-amber-50/30'}`}
+                              >
+                                <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                                  <Checkbox
+                                    checked={isPermitted}
+                                    disabled={lateActionLoadingId === p.id}
+                                    onCheckedChange={(checked) => {
+                                      if (checked) handleGrantLatePermit(p.id)
+                                      else handleRevokeLatePermit(p.id)
+                                    }}
+                                    className="mt-0.5 h-4 w-4 border-amber-400 data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-xs text-slate-800">{p.nama}</span>
+                                      {p.divisi && <span className="text-[10px] text-slate-400">({p.divisi})</span>}
+                                      <span className={`text-[10px] font-bold ${Number(userSaldo) <= 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                                        • Saldo Rp {Number(userSaldo).toLocaleString('id-ID')}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                      <span
+                                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                          isFrequent
+                                            ? 'bg-red-100 text-red-700'
+                                            : freq.monthUsed > 0
+                                              ? 'bg-amber-100 text-amber-800'
+                                              : 'bg-slate-100 text-slate-600'
+                                        }`}
+                                      >
+                                        Minggu ini: {freq.weekUsed}x • Bulan ini: {freq.monthUsed}x
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="shrink-0">
+                                  {isPermitted ? (
+                                    <span className="text-[11px] font-black text-emerald-700 tabular-nums bg-white border border-emerald-300 px-2 py-1 rounded-lg">
+                                      ⏳ {formatCountdown(remSec)}
+                                    </span>
+                                  ) : (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={lateActionLoadingId === p.id}
+                                      onClick={() => handleGrantLatePermit(p.id)}
+                                      className="h-7 text-[11px] px-2.5 border-amber-300 text-amber-800 hover:bg-amber-50 font-bold"
+                                    >
+                                      {lateActionLoadingId === p.id ? '...' : 'Izinkan 15m'}
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <Button
             onClick={() => {
               resetManualForm()

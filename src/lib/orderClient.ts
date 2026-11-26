@@ -6,7 +6,12 @@ export interface KantinProfile {
   divisi?: string | null
   saldo: number
   status?: string | null
+  late_access_until?: string | null
+  late_grace_locked?: boolean | null
 }
+
+export const ADMIN_WA_NUMBER = '6287885456448'
+export const PRE_CUTOFF_WARNING_SECONDS = 30 * 60
 
 export interface OrderItemPayload {
   p_menu_id: string | null
@@ -29,9 +34,9 @@ export interface LiveSaldoCheckResult {
 }
 
 /**
- * Returns current Jakarta (WIB) date (`YYYY-MM-DD`) and time (`HH:mm`).
+ * Returns current Jakarta (WIB) date (`YYYY-MM-DD`), time (`HH:mm`), and elapsed seconds today.
  */
-export function getJakartaDateTime(): { dateStr: string; timeStr: string } {
+export function getJakartaClock(nowMs = Date.now()): { dateStr: string; timeStr: string; totalSeconds: number } {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Jakarta',
     year: 'numeric',
@@ -39,17 +44,72 @@ export function getJakartaDateTime(): { dateStr: string; timeStr: string } {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false,
-  }).formatToParts(new Date())
+  }).formatToParts(new Date(nowMs))
 
-  const get = (type: string) => parts.find(p => p.type === type)?.value || ''
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '00'
   const rawHour = get('hour')
   const hour = rawHour === '24' ? '00' : rawHour
+  const minute = get('minute')
+  const second = get('second')
+
+  const totalSeconds =
+    (parseInt(hour, 10) || 0) * 3600 +
+    (parseInt(minute, 10) || 0) * 60 +
+    (parseInt(second, 10) || 0)
 
   return {
     dateStr: `${get('year')}-${get('month')}-${get('day')}`,
-    timeStr: `${hour}:${get('minute')}`,
+    timeStr: `${hour}:${minute}`,
+    totalSeconds,
   }
+}
+
+export function getJakartaDateTime(): { dateStr: string; timeStr: string } {
+  const { dateStr, timeStr } = getJakartaClock()
+  return { dateStr, timeStr }
+}
+
+export function getSecondsUntilCutoff(jamTutup: string | null | undefined, nowSeconds: number): number | null {
+  if (!jamTutup) return null
+  const [hhStr, mmStr] = jamTutup.split(':')
+  const hh = parseInt(hhStr, 10)
+  const mm = parseInt(mmStr, 10)
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null
+  return hh * 3600 + mm * 60 - nowSeconds
+}
+
+export function formatCountdown(totalSeconds: number): string {
+  const clamped = Math.max(0, Math.floor(totalSeconds))
+  const hours = Math.floor(clamped / 3600)
+  const mins = Math.floor((clamped % 3600) / 60)
+  const secs = clamped % 60
+  if (hours > 0) {
+    return `${hours}j ${mins.toString().padStart(2, '0')}m`
+  }
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+}
+
+export function getLatePermitRemainingSeconds(lateAccessUntil?: string | null, nowMs = Date.now()): number {
+  if (!lateAccessUntil) return 0
+  const expiresMs = new Date(lateAccessUntil).getTime()
+  if (Number.isNaN(expiresMs)) return 0
+  return Math.max(0, Math.floor((expiresMs - nowMs) / 1000))
+}
+
+export function buildLateReasonWaUrl(opts: {
+  userName: string
+  menuName: string
+  jamTutup?: string | null
+  reason: string
+}): string {
+  const jamLabel = opts.jamTutup ? ` (tutup jam ${opts.jamTutup.substring(0, 5)} WIB)` : ''
+  const text =
+    `Halo Mas Yana, maaf saya *${opts.userName}* telat pesan *${opts.menuName}*${jamLabel}.\n` +
+    `Alasan: ${opts.reason}\n\n` +
+    `Kalau masih memungkinkan, boleh minta dibukakan izin pesan telat 15 menit ya Mas? Terima kasih 🙏`
+  return `https://wa.me/${ADMIN_WA_NUMBER}?text=${encodeURIComponent(text)}`
 }
 
 export const INSUFFICIENT_SALDO_TITLE = 'Saldonya belum cukup nih, Kak 🥺🐾'
@@ -234,18 +294,23 @@ export const CLOSED_MENU_IMAGE = '/pesanan-tutup.jpg'
 
 export function getMenuClosedReason(
   menu: { is_active?: boolean | null; jam_tutup?: string | null },
-  timeStr: string
+  timeStr: string,
+  options?: { hasLatePermit?: boolean }
 ): MenuClosedReason {
   if (menu.is_active === false) return 'inactive'
-  if (menu.jam_tutup && timeStr >= menu.jam_tutup.substring(0, 5)) return 'cutoff'
+  if (menu.jam_tutup && timeStr >= menu.jam_tutup.substring(0, 5)) {
+    if (options?.hasLatePermit) return null
+    return 'cutoff'
+  }
   return null
 }
 
 export function isMenuClosed(
   menu: { is_active?: boolean | null; jam_tutup?: string | null },
-  timeStr: string
+  timeStr: string,
+  options?: { hasLatePermit?: boolean }
 ): boolean {
-  return getMenuClosedReason(menu, timeStr) !== null
+  return getMenuClosedReason(menu, timeStr, options) !== null
 }
 
 export function showClosedMenuAlert(
@@ -466,7 +531,13 @@ export async function submitOrderBatch(
   profileId: string,
   items: OrderItemPayload[],
   bypassTimeCheck = false
-): Promise<{ orderIds: string[]; newSaldo: number | null }> {
+): Promise<{
+  orderIds: string[]
+  newSaldo: number | null
+  usedLatePermit: boolean
+  lateAccessUntil: string | null | undefined
+  lateGraceLocked: boolean | undefined
+}> {
   const { data: batchData, error: batchErr } = await supabase.rpc('process_order_batch', {
     p_profile_id: profileId,
     p_items: items,
@@ -480,7 +551,12 @@ export async function submitOrderBatch(
         ? [batchData.order_id]
         : []
     const newSaldo = typeof batchData.new_saldo === 'number' ? batchData.new_saldo : null
-    return { orderIds, newSaldo }
+    const usedLatePermit = Boolean(batchData.used_late_permit)
+    const lateAccessUntil =
+      batchData.late_access_until !== undefined ? (batchData.late_access_until as string | null) : undefined
+    const lateGraceLocked =
+      typeof batchData.late_grace_locked === 'boolean' ? batchData.late_grace_locked : undefined
+    return { orderIds, newSaldo, usedLatePermit, lateAccessUntil, lateGraceLocked }
   }
 
   const msg = batchErr?.message || ''
@@ -516,5 +592,11 @@ export async function submitOrderBatch(
     if (typeof rpcData?.new_saldo === 'number') latestSaldo = rpcData.new_saldo
   }
 
-  return { orderIds: createdOrderIds, newSaldo: latestSaldo }
+  return {
+    orderIds: createdOrderIds,
+    newSaldo: latestSaldo,
+    usedLatePermit: false,
+    lateAccessUntil: undefined,
+    lateGraceLocked: undefined,
+  }
 }

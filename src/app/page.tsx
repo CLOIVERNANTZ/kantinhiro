@@ -14,7 +14,8 @@ export default async function Home() {
     { data: profiles },
     { data: menus },
     { data: addons },
-    { data: orders }
+    { data: orders },
+    { data: lateSetting }
   ] = await Promise.all([
     supabase.from('kantin_profiles').select('*').order('nama'),
     supabase.from('kantin_menus').select('*'),
@@ -28,8 +29,11 @@ export default async function Home() {
         kantin_addons(nama)
       `)
       .eq('tanggal', todayStr)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }),
+    supabase.from('kantin_settings').select('value').eq('key', 'late_order_feature').maybeSingle()
   ])
+
+  const initialLateFeatureEnabled = (lateSetting?.value as { enabled?: boolean } | null)?.enabled ?? true
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
@@ -40,6 +44,7 @@ export default async function Home() {
         menus={menus || []} 
         addons={addons || []}
         initialOrders={orders || []}
+        initialLateFeatureEnabled={initialLateFeatureEnabled}
       />
     </div>
   )

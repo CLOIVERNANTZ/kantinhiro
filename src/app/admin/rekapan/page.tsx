@@ -16,7 +16,8 @@ export default async function RekapanPage() {
     { data: orders, error },
     { data: profiles },
     { data: menus },
-    { data: addons }
+    { data: addons },
+    { data: lateSetting }
   ] = await Promise.all([
     supabase
       .from('kantin_orders')
@@ -27,12 +28,14 @@ export default async function RekapanPage() {
         kantin_addons(nama)
       `)
       .eq('tanggal', todayStr),
-    supabase.from('kantin_profiles').select('id, nama, divisi, saldo, status').order('nama'),
+    supabase.from('kantin_profiles').select('id, nama, divisi, saldo, status, late_access_until, late_grace_locked').order('nama'),
     supabase.from('kantin_menus').select('*').eq('is_active', true).order('nama'),
-    supabase.from('kantin_addons').select('*').eq('is_active', true).order('nama')
+    supabase.from('kantin_addons').select('*').eq('is_active', true).order('nama'),
+    supabase.from('kantin_settings').select('value').eq('key', 'late_order_feature').maybeSingle()
   ])
 
   const formattedDate = format(new Date(), 'EEEE, dd MMMM yyyy', { locale: id })
+  const initialLateFeatureEnabled = (lateSetting?.value as { enabled?: boolean } | null)?.enabled ?? true
 
   if (error) {
     return <div className="p-4 text-red-500">Gagal memuat data rekapan.</div>
@@ -53,6 +56,7 @@ export default async function RekapanPage() {
         profiles={profiles || []}
         menus={menus || []}
         addons={addons || []}
+        initialLateFeatureEnabled={initialLateFeatureEnabled}
       />
     </div>
   )

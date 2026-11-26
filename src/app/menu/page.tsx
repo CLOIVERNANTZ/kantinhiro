@@ -14,7 +14,8 @@ export default async function MenuPage() {
     { data: menus, error: menuError },
     { data: addons, error: addonError },
     { data: profiles, error: profileError },
-    { data: orders, error: ordersError }
+    { data: orders, error: ordersError },
+    { data: lateSetting }
   ] = await Promise.all([
     supabase.from('kantin_menus').select('*').order('nama'),
     supabase.from('kantin_addons').select('*').order('kategori'),
@@ -28,8 +29,11 @@ export default async function MenuPage() {
         kantin_addons(nama)
       `)
       .eq('tanggal', todayStr)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }),
+    supabase.from('kantin_settings').select('value').eq('key', 'late_order_feature').maybeSingle()
   ])
+
+  const initialLateFeatureEnabled = (lateSetting?.value as { enabled?: boolean } | null)?.enabled ?? true
 
   if (menuError) {
     console.error(menuError)
@@ -62,6 +66,7 @@ export default async function MenuPage() {
         addons={addons || []} 
         profiles={profiles || []} 
         orders={orders || []}
+        initialLateFeatureEnabled={initialLateFeatureEnabled}
       />
     </div>
   )

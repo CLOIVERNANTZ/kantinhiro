@@ -20,27 +20,47 @@ import {
   ComboOrderEntry,
   LastMealSuggestion,
   MenuClosedReason,
+  PRE_CUTOFF_WARNING_SECONDS,
   TopOrderCombo,
   clearUserSessionStorage,
   fetchLiveSaldoAndValidate,
   fetchProfileOrderSuggestions,
   findProfileFromSession,
+  formatCountdown,
+  getJakartaClock,
   getJakartaDateTime,
+  getLatePermitRemainingSeconds,
   getMenuClosedReason,
+  getSecondsUntilCutoff,
   handleFailedSaldoCheck,
   handleOrderError,
   isMenuClosed,
   KantinProfile,
   OrderItemPayload,
-  showClosedMenuAlert,
   submitOrderBatch,
 } from '@/lib/orderClient'
 import { getJakartaWelcomeGreeting, DailyGreetingData } from '@/lib/greetings'
+import ClosedMenuDialog, { ClosedMenuDialogTarget } from '@/components/ClosedMenuDialog'
 
-export default function OrderForm({ profiles, menus, addons, initialOrders }: { profiles: any[], menus: any[], addons: any[], initialOrders: any[] }) {
+export default function OrderForm({
+  profiles,
+  menus,
+  addons,
+  initialOrders,
+  initialLateFeatureEnabled = true,
+}: {
+  profiles: any[]
+  menus: any[]
+  addons: any[]
+  initialOrders: any[]
+  initialLateFeatureEnabled?: boolean
+}) {
   const { showAlert, showConfirm } = useAppDialog()
   const router = useRouter()
   const [orders, setOrders] = useState(initialOrders)
+  const [lateFeatureEnabled, setLateFeatureEnabled] = useState(initialLateFeatureEnabled)
+  const [nowMs, setNowMs] = useState<number>(0)
+  const [closedDialogTarget, setClosedDialogTarget] = useState<ClosedMenuDialogTarget | null>(null)
   
   // Auth State
   const [activeProfile, setActiveProfile] = useState<KantinProfile | null>(null)
@@ -52,6 +72,15 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   const [newPin, setNewPin] = useState('')
   const [pinMsg, setPinMsg] = useState({ type: '', text: '' })
   const [pinLoading, setPinLoading] = useState(false)
+
+  useEffect(() => {
+    const startTimer = setTimeout(() => setNowMs(Date.now()), 0)
+    const interval = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => {
+      clearTimeout(startTimer)
+      clearInterval(interval)
+    }
+  }, [])
 
   useEffect(() => {
     const savedName = localStorage.getItem('kantin_userName')
@@ -75,6 +104,98 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     }
   }, [profiles])
 
+  // Realtime listener untuk izin telat 15 menit, update saldo, dan toggle layanan telat
+  useEffect(() => {
+    if (!activeProfile?.id) return
+    const pid = activeProfile.id
+
+    const profileChannel = supabase
+      .channel(`user_profile_permit_${pid}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'kantin_profiles', filter: `id=eq.${pid}` },
+        (payload) => {
+          const updated = payload.new as Partial<KantinProfile> | null
+          if (updated) {
+            setActiveProfile(prev =>
+              prev
+                ? {
+                    ...prev,
+                    saldo: typeof updated.saldo === 'number' ? updated.saldo : prev.saldo,
+                    late_access_until:
+                      updated.late_access_until !== undefined ? updated.late_access_until : prev.late_access_until,
+                    late_grace_locked:
+                      typeof updated.late_grace_locked === 'boolean'
+                        ? updated.late_grace_locked
+                        : prev.late_grace_locked,
+                    status: updated.status !== undefined ? updated.status : prev.status,
+                  }
+                : prev
+            )
+          }
+        }
+      )
+      .subscribe()
+
+    // Sinkronkan centang / unceklis Admin pada pesanan user secara live
+    const ordersChannel = supabase
+      .channel(`user_orders_sync_${pid}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'kantin_orders', filter: `profile_id=eq.${pid}` },
+        (payload) => {
+          const updated = payload.new as { id?: string; status?: string; is_recap_checked?: boolean; admin_note?: string; harga?: number; harga_addon?: number } | null
+          if (updated?.id) {
+            setOrders(prev =>
+              prev.map(o =>
+                o.id === updated.id
+                  ? {
+                      ...o,
+                      status: updated.status ?? o.status,
+                      is_recap_checked: updated.is_recap_checked ?? o.is_recap_checked,
+                      admin_note: updated.admin_note ?? o.admin_note,
+                      harga: updated.harga ?? o.harga,
+                      harga_addon: updated.harga_addon ?? o.harga_addon,
+                    }
+                  : o
+              )
+            )
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'kantin_orders', filter: `profile_id=eq.${pid}` },
+        (payload) => {
+          const oldRow = payload.old as { id?: string } | null
+          if (oldRow?.id) {
+            setOrders(prev => prev.filter(o => o.id !== oldRow.id))
+          }
+        }
+      )
+      .subscribe()
+
+    const settingsChannel = supabase
+      .channel(`late_feature_setting_home_${pid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'kantin_settings', filter: 'key=eq.late_order_feature' },
+        (payload) => {
+          const row = payload.new as { value?: { enabled?: boolean } } | null
+          if (row?.value && typeof row.value.enabled === 'boolean') {
+            setLateFeatureEnabled(row.value.enabled)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(profileChannel)
+      supabase.removeChannel(ordersChannel)
+      supabase.removeChannel(settingsChannel)
+    }
+  }, [activeProfile?.id])
+
   // Warteg State
   const [selectedGroup, setSelectedGroup] = useState<string>('')
   const [selectedAddonCategory, setSelectedAddonCategory] = useState<string>('')
@@ -92,6 +213,12 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyTx, setHistoryTx] = useState<any[]>([])
 
+  const latePermitRemainingSec =
+    nowMs > 0 && lateFeatureEnabled
+      ? getLatePermitRemainingSeconds(activeProfile?.late_access_until, nowMs)
+      : 0
+  const hasActiveLatePermit = latePermitRemainingSec > 0
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setWelcomeData(getJakartaWelcomeGreeting())
@@ -107,7 +234,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         activeProfile.id,
         menus,
         addons,
-        todayStr
+        todayStr,
+        { ignoreCutoff: hasActiveLatePermit }
       )
       setLastMeal(last)
       setTopCombos(combos)
@@ -123,7 +251,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     }
 
     loadSuggestions()
-  }, [activeProfile?.id, menus, addons, todayStr])
+  }, [activeProfile?.id, menus, addons, todayStr, hasActiveLatePermit])
 
   // Active addons & categories extraction
   const activeAddons = useMemo(() => addons.filter(a => a.is_active !== false), [addons])
@@ -134,9 +262,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     return Array.from(cats).sort()
   }, [activeAddons])
 
+  const jakartaClock = useMemo(
+    () => (nowMs > 0 ? getJakartaClock(nowMs) : getJakartaClock()),
+    [nowMs]
+  )
+
   // Groups extraction with open/closed status (sorted: Open A-Z first, Closed A-Z after)
   const menuGroupsInfo = useMemo(() => {
-    const currentJakartaTime = getJakartaDateTime().timeStr
+    const currentJakartaTime = jakartaClock.timeStr
     const groupMap = new Map<string, { is_active?: boolean | null; jam_tutup?: string | null }[]>()
 
     menus.forEach(m => {
@@ -149,13 +282,15 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     return Array.from(groupMap.entries())
       .map(([name, groupMenus]) => ({
         name,
-        isClosed: groupMenus.length > 0 && groupMenus.every(m => isMenuClosed(m, currentJakartaTime)),
+        isClosed:
+          groupMenus.length > 0 &&
+          groupMenus.every(m => isMenuClosed(m, currentJakartaTime, { hasLatePermit: hasActiveLatePermit })),
       }))
       .sort((a, b) => {
         if (a.isClosed !== b.isClosed) return a.isClosed ? 1 : -1
         return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' })
       })
-  }, [menus])
+  }, [menus, jakartaClock.timeStr, hasActiveLatePermit])
 
   // Prioritize first OPEN group when user hasn't picked one manually
   const effectiveGroup = selectedGroup || (menuGroupsInfo.find(g => !g.isClosed) || menuGroupsInfo[0])?.name || ''
@@ -191,7 +326,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     if (isHabis) return // Cannot select sold out items
 
     if (closedReason) {
-      showClosedMenuAlert(showAlert, itemName, closedReason, jamTutup)
+      setClosedDialogTarget({ menuName: itemName, reason: closedReason, jamTutup })
       return
     }
 
@@ -217,6 +352,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     }
 
     const { dateStr, timeStr: jakartaTimeStr } = getJakartaDateTime()
+    const permitValidNow =
+      lateFeatureEnabled && getLatePermitRemainingSeconds(activeProfile?.late_access_until) > 0
 
     for (const itemId of checkedItems) {
       const isMenu = menus.find(x => x.id === itemId)
@@ -225,9 +362,9 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           showAlert({ title: 'Menu Habis', message: `Menu ${isMenu.nama} sedang habis hari ini.`, type: 'warning' })
           return
         }
-        const closedReason = getMenuClosedReason(isMenu, jakartaTimeStr)
+        const closedReason = getMenuClosedReason(isMenu, jakartaTimeStr, { hasLatePermit: permitValidNow })
         if (closedReason) {
-          showClosedMenuAlert(showAlert, isMenu.nama, closedReason, isMenu.jam_tutup)
+          setClosedDialogTarget({ menuName: isMenu.nama, reason: closedReason, jamTutup: isMenu.jam_tutup })
           return
         }
       }
@@ -238,7 +375,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           return
         }
         if (isAddon.is_active === false) {
-          showClosedMenuAlert(showAlert, isAddon.nama, 'inactive')
+          setClosedDialogTarget({ menuName: isAddon.nama, reason: 'inactive' })
           return
         }
       }
@@ -294,7 +431,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         return
       }
 
-      const { orderIds, newSaldo } = await submitOrderBatch(p_id, payloads)
+      const wasGraceLocked = Boolean(activeProfile?.late_grace_locked)
+      const { orderIds, newSaldo, usedLatePermit, lateAccessUntil, lateGraceLocked } = await submitOrderBatch(p_id, payloads)
 
       let newOrders: any[] = []
       if (orderIds.length > 0) {
@@ -309,14 +447,29 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       }
 
       // All succeeded
-      if (newSaldo !== null) {
-        setActiveProfile((prev) => prev ? { ...prev, saldo: newSaldo } : prev)
-      }
+      setActiveProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              saldo: newSaldo !== null ? newSaldo : prev.saldo,
+              late_access_until: lateAccessUntil !== undefined ? lateAccessUntil : prev.late_access_until,
+              late_grace_locked: lateGraceLocked !== undefined ? lateGraceLocked : prev.late_grace_locked,
+            }
+          : prev
+      )
       setOrders(prev => [...newOrders, ...prev])
       setCheckedItems([])
       setItemNotes({})
       router.refresh()
-      showAlert({ title: "Berhasil", message: "Pesanan Anda berhasil dibuat!", type: "success" })
+      showAlert({
+        title: "Berhasil",
+        message: usedLatePermit
+          ? wasGraceLocked
+            ? "Pesanan revisi Anda berhasil dibuat! Sisa waktu revisi 3 menit tetap berjalan."
+            : "Pesanan Anda berhasil dibuat!\n\nAnda punya waktu revisi 3 menit untuk menghapus & mengganti pesanan jika ada yang salah (selama belum dicentang Admin)."
+          : "Pesanan Anda berhasil dibuat!",
+        type: "success",
+      })
       window.dispatchEvent(new Event('kantin_user_updated'))
 
     } catch (e: any) {
@@ -340,6 +493,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
     setShowSuggestions(false)
 
     const { dateStr, timeStr: jakartaTimeStr } = getJakartaDateTime()
+    const permitValidNow =
+      lateFeatureEnabled && getLatePermitRemainingSeconds(activeProfile?.late_access_until) > 0
 
     // Cek status tutup, jam tutup & item habis secara live dari master menus/addons
     const availableEntries: { entry: ComboOrderEntry; liveMenu?: any; liveAddon?: any }[] = []
@@ -347,7 +502,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       if (entry.menu_id) {
         const liveMenu = menus.find(m => m.id === entry.menu_id)
         if (!liveMenu) {
-          showClosedMenuAlert(showAlert, entry.nama, 'inactive')
+          setClosedDialogTarget({ menuName: entry.nama, reason: 'inactive' })
           return
         }
         if (liveMenu.is_habis) {
@@ -358,16 +513,16 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           })
           return
         }
-        const closedReason = getMenuClosedReason(liveMenu, jakartaTimeStr)
+        const closedReason = getMenuClosedReason(liveMenu, jakartaTimeStr, { hasLatePermit: permitValidNow })
         if (closedReason) {
-          showClosedMenuAlert(showAlert, liveMenu.nama, closedReason, liveMenu.jam_tutup)
+          setClosedDialogTarget({ menuName: liveMenu.nama, reason: closedReason, jamTutup: liveMenu.jam_tutup })
           return
         }
         availableEntries.push({ entry, liveMenu })
       } else if (entry.addon_id) {
         const liveAddon = addons.find(a => a.id === entry.addon_id)
         if (!liveAddon || liveAddon.is_active === false) {
-          showClosedMenuAlert(showAlert, liveAddon?.nama || entry.nama, 'inactive')
+          setClosedDialogTarget({ menuName: liveAddon?.nama || entry.nama, reason: 'inactive' })
           return
         }
         if (liveAddon.is_habis) {
@@ -443,7 +598,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         return
       }
 
-      const { orderIds, newSaldo } = await submitOrderBatch(p_id, payloads)
+      const wasGraceLocked = Boolean(activeProfile?.late_grace_locked)
+      const { orderIds, newSaldo, usedLatePermit, lateAccessUntil, lateGraceLocked } = await submitOrderBatch(p_id, payloads)
 
       let newOrders: any[] = []
       if (orderIds.length > 0) {
@@ -457,12 +613,27 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         }
       }
 
-      if (newSaldo !== null) {
-        setActiveProfile((prev) => prev ? { ...prev, saldo: newSaldo } : prev)
-      }
+      setActiveProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              saldo: newSaldo !== null ? newSaldo : prev.saldo,
+              late_access_until: lateAccessUntil !== undefined ? lateAccessUntil : prev.late_access_until,
+              late_grace_locked: lateGraceLocked !== undefined ? lateGraceLocked : prev.late_grace_locked,
+            }
+          : prev
+      )
       setOrders(prev => [...newOrders, ...prev])
       router.refresh()
-      showAlert({ title: 'Berhasil', message: 'Pesanan Anda berhasil dibuat!', type: 'success' })
+      showAlert({
+        title: 'Berhasil',
+        message: usedLatePermit
+          ? wasGraceLocked
+            ? 'Pesanan revisi Anda berhasil dibuat! Sisa waktu revisi 3 menit tetap berjalan.'
+            : 'Pesanan Anda berhasil dibuat!\n\nAnda punya waktu revisi 3 menit untuk menghapus & mengganti pesanan jika ada yang salah (selama belum dicentang Admin).'
+          : 'Pesanan Anda berhasil dibuat!',
+        type: 'success',
+      })
       window.dispatchEvent(new Event('kantin_user_updated'))
     } catch (e: any) {
       await handleOrderError(e, { showAlert, showConfirm }, () => router.push('/topup'), 'Gagal memproses pesanan: ')
@@ -491,23 +662,36 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   const handleDelete = async (orderId: string) => {
     const order = orders.find(o => o.id === orderId)
     if (!order) return
+
+    if (order.status !== 'pending' || order.is_recap_checked) {
+      showAlert({
+        title: "Sudah Dicentang Admin",
+        message: "Pesanan ini sudah dicentang/diproses oleh Mas Yana sehingga tidak bisa dihapus (kecuali di-unceklis oleh Admin).",
+        type: "warning"
+      })
+      return
+    }
     
-    // Cek jam tutup khusus untuk Menu
+    // Cek jam tutup khusus untuk Menu (termasuk masa revisi 3 menit untuk pesanan izin telat)
     if (order.kantin_menus?.jam_tutup) {
       const jamTutup = order.kantin_menus.jam_tutup
-      const now = new Date()
-      const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
-      const hours = jakartaTime.getHours().toString().padStart(2, '0')
-      const minutes = jakartaTime.getMinutes().toString().padStart(2, '0')
-      const jakartaTimeStr = `${hours}:${minutes}`
+      const jakartaTimeStr = getJakartaDateTime().timeStr
       
       if (jakartaTimeStr >= jamTutup.substring(0, 5)) {
-        showAlert({
-          title: "Batas Waktu Lewat",
-          message: `Waktu pembatalan untuk menu ini sudah ditutup (Batas: ${jamTutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung jika ada perubahan mendesak.`,
-          type: "error"
-        })
-        return
+        const isWithinGraceRevision =
+          Boolean(order.is_late_order) &&
+          hasActiveLatePermit &&
+          Boolean(order.created_at) &&
+          (Date.now() - new Date(order.created_at).getTime()) <= 3 * 60 * 1000
+
+        if (!isWithinGraceRevision) {
+          showAlert({
+            title: "Batas Waktu Lewat",
+            message: `Waktu pembatalan untuk menu ini sudah ditutup (Batas: ${jamTutup.substring(0, 5)}).\nSilakan hubungi admin secara langsung jika ada perubahan mendesak.`,
+            type: "error"
+          })
+          return
+        }
       }
     }
     
@@ -524,6 +708,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
       
       if (error) throw error
 
+      const refundedAmount = Number(order.harga || 0) + Number(order.harga_addon || 0)
+      setActiveProfile(prev => prev ? { ...prev, saldo: prev.saldo + refundedAmount } : prev)
       setOrders(orders.filter(o => o.id !== orderId))
       router.refresh()
       window.dispatchEvent(new Event('kantin_user_updated'))
@@ -598,7 +784,6 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
   }
 
   const selectedGroupClosed = menuGroupsInfo.find(g => g.name === effectiveGroup)?.isClosed ?? false
-  const currentJakartaTime = getJakartaDateTime().timeStr
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -778,6 +963,26 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         </div>
 
         {/* Group & Addon Selectors — balanced 2-column Gold & White bar */}
+        {hasActiveLatePermit && (
+          <div className={`bg-gradient-to-r rounded-xl px-4 py-3 shadow-xs flex flex-wrap items-center justify-between gap-2 border-2 ${activeProfile?.late_grace_locked ? 'from-amber-50 via-yellow-50 to-white border-amber-300' : 'from-emerald-50 via-amber-50/70 to-white border-emerald-300'}`}>
+            <div>
+              <p className={`text-xs md:text-sm font-black ${activeProfile?.late_grace_locked ? 'text-amber-900' : 'text-emerald-900'}`}>
+                {activeProfile?.late_grace_locked
+                  ? '✏️ Masa Revisi / Ganti Pesanan Aktif!'
+                  : '🔓 Izin Pesan Telat dari Mas Yana Aktif!'}
+              </p>
+              <p className={`text-[11px] mt-0.5 ${activeProfile?.late_grace_locked ? 'text-amber-800' : 'text-emerald-800'}`}>
+                {activeProfile?.late_grace_locked
+                  ? 'Salah pilih? Kamu boleh hapus pesanan telat (selama belum dicentang Admin) & pesan penggantinya sebelum timer habis.'
+                  : 'Setelah pesan, tersedia waktu revisi 3 menit jika ingin hapus & ganti menu. Tidak berlaku untuk toko yang Tutup Grup.'}
+              </p>
+            </div>
+            <div className={`bg-white px-3 py-1 rounded-full text-xs font-black tabular-nums shadow-2xs border ${activeProfile?.late_grace_locked ? 'border-amber-300 text-amber-800' : 'border-emerald-300 text-emerald-800'}`}>
+              ⏳ {formatCountdown(latePermitRemainingSec)}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sticky top-12 md:top-14 z-20 bg-white/95 backdrop-blur-sm p-2.5 rounded-xl border border-amber-200 shadow-xs">
           {/* Menu Utama */}
           <div className="flex items-center gap-2 bg-amber-50/70 border border-amber-200 rounded-lg px-3 py-2">
@@ -819,17 +1024,34 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
         </div>
 
         {/* Menu Items Grid */}
-        {effectiveGroup && effectiveGroup !== 'none' && (
+        {effectiveGroup && effectiveGroup !== 'none' && (() => {
+          const groupSoonClosingSec =
+            nowMs > 0
+              ? currentGroupMenus
+                  .filter(m => m.is_active !== false && !m.is_habis)
+                  .map(m => getSecondsUntilCutoff(m.jam_tutup, jakartaClock.totalSeconds))
+                  .filter((s): s is number => s !== null && s > 0 && s <= PRE_CUTOFF_WARNING_SECONDS)
+                  .sort((a, b) => a - b)[0] ?? null
+              : null
+
+          return (
           <div className="bg-white rounded-xl border border-amber-200 overflow-hidden shadow-xs">
-            <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-white border-b border-amber-200 flex items-center justify-between gap-2">
+            <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-white border-b border-amber-200 flex items-center justify-between gap-2 flex-wrap">
               <div className="font-black text-amber-900 text-sm md:text-base">
                 Makanan Utama: {effectiveGroup}
               </div>
-              {selectedGroupClosed && (
-                <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold uppercase">
-                  Sedang Tutup
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {groupSoonClosingSec !== null && !selectedGroupClosed && (
+                  <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full font-bold tabular-nums animate-pulse">
+                    ⏳ Tutup {formatCountdown(groupSoonClosingSec)} lagi
+                  </span>
+                )}
+                {selectedGroupClosed && (
+                  <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold uppercase">
+                    Sedang Tutup
+                  </span>
+                )}
+              </div>
             </div>
             <div className="p-3.5 md:p-4">
               {currentGroupMenus.length === 0 ? (
@@ -839,10 +1061,21 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                   {currentGroupMenus.map(menu => {
                     // @ts-ignore
                     const isHabis = menu.is_habis === true
-                    const closedReason = getMenuClosedReason(menu, currentJakartaTime)
+                    const closedReason = getMenuClosedReason(menu, jakartaClock.timeStr, { hasLatePermit: hasActiveLatePermit })
                     const isTutup = closedReason !== null
                     const isLocked = isHabis || isTutup
                     const isChecked = checkedItems.includes(menu.id)
+                    const isUnlockedByLatePermit =
+                      hasActiveLatePermit &&
+                      menu.is_active !== false &&
+                      !!menu.jam_tutup &&
+                      jakartaClock.timeStr >= menu.jam_tutup.substring(0, 5)
+                    const secUntilCutoff =
+                      nowMs > 0 && menu.is_active !== false && !isHabis
+                        ? getSecondsUntilCutoff(menu.jam_tutup, jakartaClock.totalSeconds)
+                        : null
+                    const isClosingSoon =
+                      secUntilCutoff !== null && secUntilCutoff > 0 && secUntilCutoff <= PRE_CUTOFF_WARNING_SECONDS
                     
                     return (
                       <div
@@ -886,6 +1119,16 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                                   {closedReason === 'cutoff' && menu.jam_tutup ? `Tutup ${menu.jam_tutup.substring(0, 5)}` : 'Tutup'}
                                 </span>
                               )}
+                              {!isLocked && isUnlockedByLatePermit && (
+                                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold shrink-0">
+                                  🔓 Izin Telat
+                                </span>
+                              )}
+                              {!isLocked && !isUnlockedByLatePermit && isClosingSoon && secUntilCutoff !== null && (
+                                <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded font-bold tabular-nums shrink-0">
+                                  ⏳ {formatCountdown(secUntilCutoff)}
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs md:text-sm text-amber-700 font-black">Rp {menu.harga.toLocaleString('id-ID')}</p>
                           </div>
@@ -909,7 +1152,8 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
               )}
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* Addons Items Grid — Gold & White palette */}
         {selectedAddonCategory && selectedAddonCategory !== 'none' && (
@@ -1084,7 +1328,7 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
                                 </div>
                               </TableCell>
                               <TableCell className="py-2 pr-1 text-right align-top">
-                                {order.status === 'pending' && (
+                                {order.status === 'pending' && !order.is_recap_checked && (
                                   <Button 
                                     variant="ghost" 
                                     size="icon" 
@@ -1291,6 +1535,14 @@ export default function OrderForm({ profiles, menus, addons, initialOrders }: { 
           </div>
         </DialogContent>
       </Dialog>
+
+      <ClosedMenuDialog
+        target={closedDialogTarget}
+        onClose={() => setClosedDialogTarget(null)}
+        userName={activeProfile?.nama || ''}
+        userSaldo={activeProfile?.saldo || 0}
+        lateFeatureEnabled={lateFeatureEnabled}
+      />
     </div>
     </div>
   )
